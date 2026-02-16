@@ -1,0 +1,36 @@
+{
+  "name": "@troshab/claude-code-zit",
+  "version": "0.1.0",
+  "description": "Pinned Claude Code dashboard + workspace tabs for Tabby",
+  "main": "dist/index.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "postinstall": "node scripts/install.js",
+    "preuninstall": "node scripts/uninstall.js"
+  },
+  "keywords": [
+    "tabby-plugin"
+  ],
+  "tabbyPlugin": {
+    "name": "claude-code-zit",
+    "displayName": "Claude Code Zit",
+    "description": "Pinned Claude Code dashboard + workspace tabs"
+  },
+  "author": "tro",
+  "license": "MIT",
+  "type": "commonjs",
+  "files": [
+    "dist",
+    "bin",
+    "plugin",
+    "scripts",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.3"
+  }
+}

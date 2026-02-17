@@ -1,4 +1,4 @@
-# tabby-claude-dock
+# Claude Dock
 
 Tabby plugin that adds:
 
@@ -8,55 +8,40 @@ Tabby plugin that adds:
 - Claude Code **sessions list** (working/waiting) driven by Claude hooks writing `events.jsonl`.
 - Claude **usage** panel (reads `~/.claude/stats-cache.json`).
 
-## Install (Windows)
+## Install
 
-1. Build + link plugin into Tabby's user plugins dir:
-
-```powershell
-cd C:\Users\tro\claude-code-zit
-npm install
-npm run install:tabby
+```bash
+npm i -g @troshab/claude-dock
 ```
 
-2. Restart Tabby.
+This single command builds the plugin, deploys Claude Code hooks, and links into Tabby.
 
-Tabby plugins dir (this machine):
+Restart Tabby to activate.
 
-- `C:\Users\tro\AppData\Roaming\tabby\plugins`
-- node modules: `C:\Users\tro\AppData\Roaming\tabby\plugins\node_modules`
+## Dev workflow
 
-Dev workflow: `npm run install:tabby` creates a **junction**:
+```bash
+git clone git@github.com:troshab/claude-dock.git
+cd claude-dock
+npm install
+```
 
-- `...\tabby\plugins\node_modules\tabby-claude-dock` -> `C:\Users\tro\claude-code-zit`
+`npm install` runs build + deploy automatically. A **junction** is created:
+
+- `<tabby-plugins>/node_modules/tabby-claude-dock` -> source dir
 
 So you only rebuild (`npm run build`) and restart Tabby.
 
-## Install Claude hooks (Windows)
+## What the install does
 
-This replaces old hook commands inside `~/.claude/settings.json` with our file logger hook.
+- Copies `bin/claude-dock-hook.js` to `~/.claude/plugins/cache/claude-dock/`
+- Patches `~/.claude/settings.json` (creates a timestamped `.bak-*` backup) with hooks:
+  - `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`, `SessionEnd`
+- Links the Tabby plugin into `<tabby-plugins>/node_modules/tabby-claude-dock`
 
-```powershell
-cd C:\Users\tro\claude-code-zit
-npm run install:claude-hooks
-```
-
-What it does:
-
-- Copies `bin/claude-dock-hook.js` to the plugin cache
-- Patches `C:\Users\tro\.claude\settings.json` (creates a timestamped `.bak-*` backup)
-- Adds hook commands for:
-  - `SessionStart` -> `session_start`
-  - `PreToolUse` -> `tool_start`
-  - `PostToolUse` -> `tool_end`
-  - `Stop` -> `stop`
-  - `Notification` -> `notification`
-  - `SessionEnd` -> `session_end`
-
-Events are appended to:
-
-- `C:\Users\tro\.claude\claude-dock\events.jsonl`
+Events are appended to `~/.claude/claude-dock/events.jsonl`.
 
 ## Notes
 
-- This plugin assumes `tabby-local` is enabled (to open local terminals).
+- Requires `tabby-local` plugin (for local terminals).
 - Dashboard sort default: waiting first, oldest waiting on top; then working by most recent tool usage.

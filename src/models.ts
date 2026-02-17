@@ -1,5 +1,5 @@
 export type SortPreset = 'status' | 'startAsc' | 'startDesc' | 'lastActivityDesc'
-export type GroupSortPreset = 'waiting' | 'path' | 'none'
+export type GroupSortPreset = 'flat' | 'waiting' | 'path' | 'none'
 
 export interface Workspace {
   id: string
@@ -9,8 +9,12 @@ export interface Workspace {
   sortOrder?: number
   lastActiveTs?: number
   useDockerSandbox?: boolean
+  /** Custom Docker image for this workspace. Falls back to global default if empty. */
+  dockerImage?: string
   mountClaudeDir?: boolean
   dangerouslySkipPermissions?: boolean
+  /** Ports to forward from container localhost to host (via socat). */
+  forwardPorts?: number[]
 }
 
 export type SessionStatus = 'working' | 'waiting' | 'ended' | 'unknown'

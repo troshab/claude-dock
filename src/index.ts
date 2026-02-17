@@ -103,6 +103,18 @@ export default class ClaudeDockModule {
       })
       this.injectStylesOnce()
       this.subscribeTabsChanged()
+
+      // After Tabby finishes recovering all tabs, ensure dashboard keeps focus.
+      // Recovery is synchronous, but workspace ngAfterViewInit (terminal restore)
+      // is deferred — 500ms is enough for recovery to complete.
+      if (this.isDashboardPinned()) {
+        setTimeout(() => {
+          const dashboard = this.app.tabs.find(t => t instanceof DashboardTabComponent)
+          if (dashboard) {
+            this.app.selectTab(dashboard)
+          }
+        }, 500)
+      }
     })
   }
 
@@ -140,7 +152,6 @@ export default class ClaudeDockModule {
   private ensureDashboard (): void {
     const existing = this.app.tabs.find(t => t instanceof DashboardTabComponent) as DashboardTabComponent | undefined
     if (existing) {
-      this.app.selectTab(existing)
       return
     }
     const tab = this.tabs.create({ type: DashboardTabComponent })
@@ -183,10 +194,10 @@ export default class ClaudeDockModule {
     const style = document.createElement('style')
     style.id = 'claude-dock-styles'
     style.textContent = `
-      tab-header.ccz-dashboard-tabheader .buttons button:last-child {
+      tab-header.ccd-dashboard-tabheader .buttons button:last-child {
         display: none !important;
       }
-      .cz-terminal-host .xterm-viewport {
+      .cd-terminal-host .xterm-viewport {
         background-color: #000 !important;
       }
     `
@@ -200,8 +211,8 @@ export default class ClaudeDockModule {
 
     // Remove any stale markers first.
     try {
-      document.querySelectorAll('tab-header.ccz-dashboard-tabheader').forEach((el: any) => {
-        try { el.classList.remove('ccz-dashboard-tabheader') } catch { }
+      document.querySelectorAll('tab-header.ccd-dashboard-tabheader').forEach((el: any) => {
+        try { el.classList.remove('ccd-dashboard-tabheader') } catch { }
       })
     } catch { }
 
@@ -218,7 +229,7 @@ export default class ClaudeDockModule {
     setTimeout(() => {
       try {
         const header = document.querySelector('.tab-bar .tabs tab-header:first-child') as any
-        header?.classList?.add?.('ccz-dashboard-tabheader')
+        header?.classList?.add?.('ccd-dashboard-tabheader')
       } catch { }
     }, 0)
   }

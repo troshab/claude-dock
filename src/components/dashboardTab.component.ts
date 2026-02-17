@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Injector } from '@angular/core'
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Injector, NgZone } from '@angular/core'
 import { AppService, BaseTabComponent, ConfigService, NotificationsService } from 'tabby-core'
 import * as childProcess from 'child_process'
 import * as path from 'path'
@@ -17,14 +17,24 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
 
 @Component({
   selector: 'claude-dock-dashboard-tab',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ng-container *ngIf="hooksEnabled(); else hooksSetup">
       <header class="cd-header">
         <div class="cd-title">
           <h1 class="cd-title-main">Claude Dock</h1>
-          <button class="btn btn-sm btn-outline-primary cd-open-folder" (click)="openWorkspaceFolder()">
+          <button class="btn btn-sm btn-outline-primary text-nowrap" (click)="openWorkspaceFolder()">
             Open workspace
           </button>
+        </div>
+
+        <div class="cd-docker-image-block">
+          <div class="cd-docker-image-label">Docker Sandbox Image:</div>
+          <input class="cd-docker-image-input" type="text" aria-label="Default Docker image"
+            [value]="defaultDockerImage"
+            [placeholder]="'ghcr.io/troshab/claude-dock:0.1.0'"
+            (change)="setDefaultDockerImage($any($event.target).value)"
+            (blur)="setDefaultDockerImage($any($event.target).value)">
         </div>
 
         <div class="cd-usage-mini" aria-label="5-hour usage window">
@@ -60,13 +70,14 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
         </div>
 
         <div class="cd-controls">
-          <select class="form-control form-control-sm cd-select" aria-label="Sort workspaces" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
+          <select class="form-control form-control-sm w-auto" aria-label="Sort workspaces" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
+            <option value="flat">Workspace: none</option>
             <option value="none">Workspace: default</option>
             <option value="waiting">Workspace: waiting first</option>
             <option value="path">Workspace: by path</option>
           </select>
 
-          <select class="form-control form-control-sm cd-select" aria-label="Sort sessions" [value]="sortPreset" (change)="setSortPreset($any($event.target).value)">
+          <select class="form-control form-control-sm w-auto" aria-label="Sort sessions" [value]="sortPreset" (change)="setSortPreset($any($event.target).value)">
             <option value="status">Session: waiting first</option>
             <option value="startAsc">Session: oldest first</option>
             <option value="startDesc">Session: newest first</option>
@@ -77,10 +88,13 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       </header>
 
       <main class="cd-grid">
-        <div class="cd-col">
-          <h2 class="cd-section-title">Workspaces</h2>
+        <div class="cd-col cd-ws-section" [class.cd-ws-collapsed]="wsCollapsed">
+          <div class="cd-ws-summary" (click)="wsCollapsed = !wsCollapsed">
+            <span class="cd-ws-chevron"></span>
+            <h5 class="font-weight-bold">Workspaces</h5>
+          </div>
 
-          <div *ngIf="!workspaces.length" class="cd-muted cd-empty">
+          <div *ngIf="!workspaces.length" class="text-muted p-2">
             No recent workspaces yet.
           </div>
 
@@ -97,26 +111,73 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
         </div>
 
         <div class="cd-col">
-          <h2 class="cd-section-title">
+          <h5 class="font-weight-bold mb-2">
             Sessions
-            <span class="cd-muted">({{ sessionsSorted.length }})</span>
-          </h2>
+            <span class="text-muted">({{ sessionsSorted.length }})</span>
+          </h5>
 
-          <div *ngIf="!sessionsSorted.length" class="cd-muted cd-empty">
+          <div *ngIf="!sessionsSorted.length" class="text-muted p-2">
             <div>No sessions yet.</div>
           </div>
 
-        <div class="cd-groups-scroll">
+        <div class="cd-groups-scroll" *ngIf="groupSortPreset === 'flat'">
+          <div class="list-group cd-list">
+            <div
+              class="list-group-item list-group-item-action cd-row"
+              role="button" tabindex="0"
+              *ngFor="let s of sessionsSorted"
+              (click)="openWorkspaceForSession(s)"
+              (keydown.enter)="openWorkspaceForSession(s)"
+              (keydown.space)="openWorkspaceForSession(s); $event.preventDefault()"
+            >
+              <div class="cd-row-top">
+                <div class="cd-row-title">
+                  <span class="font-weight-bold">{{ sessionLabel(s, true) }}</span>
+                </div>
+                <div class="cd-row-right">
+                  <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-danger text-dark"
+                    [disabled]="!canCloseSession(s)"
+                    (click)="closeSession(s, $event)"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <ul class="cd-todos" *ngIf="todosFor(s).length">
+                <li class="cd-todo" *ngFor="let t of todosFor(s)">
+                  <span class="cd-todo-dot"
+                        [class.pending]="!t.status || t.status === 'pending'"
+                        [class.in-progress]="t.status === 'in_progress'"
+                        [class.completed]="t.status === 'completed'"></span>
+                  <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
+                </li>
+              </ul>
+
+              <div class="cd-row-bottom">
+                <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
+                <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
+                <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
+                <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cd-groups-scroll" *ngIf="groupSortPreset !== 'flat'">
           <details class="cd-group" *ngFor="let g of groupsSorted; trackBy: trackGroupKey" [attr.open]="isGroupOpen(g) ? '' : null" (toggle)="setGroupOpen(g, $event)">
             <summary class="cd-group-summary">
               <span class="cd-group-chevron"></span>
-              <span class="cd-strong">{{ normalizeCwd(g.cwd) }}</span>
+              <span class="font-weight-bold">{{ normalizeCwd(g.cwd) }}</span>
               <span class="cd-group-actions">
                 <span class="badge cd-outline-warn" *ngIf="g.waitingCount">{{ g.waitingCount }} waiting</span>
                 <span class="badge cd-outline-ok" *ngIf="g.workingCount">{{ g.workingCount }} working</span>
                 <button
                   type="button"
-                  class="btn btn-sm btn-success cd-group-new"
+                  class="btn btn-sm btn-success"
                   title="New terminal in workspace"
                   (click)="newTerminalInGroup(g, $event)"
                 >
@@ -136,13 +197,13 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
               >
                 <div class="cd-row-top">
                   <div class="cd-row-title">
-                    <span class="cd-strong">{{ sessionLabel(s, true) }}</span>
+                    <span class="font-weight-bold">{{ sessionLabel(s, true) }}</span>
                   </div>
                   <div class="cd-row-right">
                     <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
                     <button
                       type="button"
-                      class="btn btn-sm btn-danger text-dark cd-session-close"
+                      class="btn btn-sm btn-danger text-dark"
                       [disabled]="!canCloseSession(s)"
                       (click)="closeSession(s, $event)"
                     >
@@ -157,15 +218,15 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
                           [class.pending]="!t.status || t.status === 'pending'"
                           [class.in-progress]="t.status === 'in_progress'"
                           [class.completed]="t.status === 'completed'"></span>
-                    <span class="cd-todo-text" [class.done]="t.status === 'completed'">{{ t.content }}</span>
+                    <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
                   </li>
                 </ul>
 
                 <div class="cd-row-bottom">
-                  <span class="cd-muted cd-small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-                  <span class="cd-muted cd-small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-                  <span class="cd-muted cd-small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
-                  <span class="cd-muted cd-small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
+                  <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
+                  <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
+                  <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
+                  <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
                 </div>
               </div>
             </div>
@@ -191,7 +252,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
           <i class="fas fa-download" aria-hidden="true"></i>
           <code>{{ installHooksCommand }}</code>
         </button>
-        <div class="cd-muted cd-small cd-install-hint" *ngIf="installOutput">
+        <div class="text-muted small mt-1" *ngIf="installOutput">
           {{ installOutput }}
         </div>
       </section>
@@ -230,7 +291,6 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-header { display: flex; gap: var(--cd-gap-sm); align-items: stretch; justify-content: flex-start; flex-wrap: wrap; margin-bottom: var(--cd-gap-md); width: 100%; }
     .cd-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; align-items: center; justify-content: center; gap: var(--cd-gap-xs); }
     .cd-title-main { font-weight: 700; font-size: 1.15em; }
-    .cd-open-folder { white-space: nowrap; }
 .cd-usage-mini { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--cd-gap-micro) var(--cd-gap-xs); border: 1px solid var(--cd-border); border-radius: var(--cd-radius); padding: var(--cd-gap-xs) var(--cd-gap-xs-plus); }
     .cd-usage-mini-label { font-weight: 700; text-transform: uppercase; opacity: .8; }
     .cd-usage-mid { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -271,28 +331,35 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-runtime-value { text-align: right; font-variant-numeric: tabular-nums; }
     .cd-runtime-sep { padding-left: var(--cd-gap-sm); border-left: 1px solid var(--cd-border-light); }
     .cd-controls { display: flex; flex-direction: column; gap: var(--cd-gap-xs); align-items: flex-start; justify-content: center; }
-    .cd-select { width: auto; max-width: 100%; min-width: 0; }
 
-    .cd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: var(--cd-gap-md); flex: 1; min-height: 0; width: 100%; }
+    .cd-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--cd-gap-md); flex: 1; min-height: 0; width: 100%; }
     .cd-col { display: flex; flex-direction: column; min-height: 0; }
-    .cd-section-title { flex-shrink: 0; }
-    .cd-empty { flex-shrink: 0; }
-
-    h1.cd-title-main { font-size: 1.15em; margin: 0; }
-    h2.cd-section-title { font-size: 1em; margin: 0 0 var(--cd-gap-sm) 0; }
-    .cd-section-title { font-weight: 700; margin-bottom: var(--cd-gap-sm); }
+    .cd-ws-section { min-height: 0; }
+    .cd-ws-summary { display: flex; align-items: center; gap: var(--cd-gap-xs-plus); margin-bottom: var(--cd-gap-xs); }
+    .cd-ws-chevron { display: none; width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 7px; border-color: transparent transparent transparent currentColor; opacity: .6; transition: transform .15s ease; flex-shrink: 0; }
+    @media (max-width: 635px) {
+      .cd-grid { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      .cd-ws-chevron { display: inline-block; }
+      .cd-ws-summary { cursor: pointer; }
+      .cd-ws-section:not(.cd-ws-collapsed) > .cd-ws-summary > .cd-ws-chevron { transform: rotate(90deg); }
+      .cd-ws-collapsed > .cd-list,
+      .cd-ws-collapsed > .text-muted { display: none !important; }
+      .cd-ws-section:not(.cd-ws-collapsed) > .cd-list { max-height: 160px; overflow-y: auto; }
+    }
+    h1.cd-title-main { margin: 0; }
+    h5 { margin: 0; }
     .cd-groups-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: var(--cd-gap-sm); }
 
     .cd-list { border-radius: var(--cd-radius); overflow-y: auto; list-style: none; padding-left: 0; padding-right: var(--cd-gap-sm); margin: 0; flex: 1; min-height: 0; }
-    .cd-row { display: block; text-align: left; }
+    .cd-row { display: flex; flex-direction: column; gap: var(--cd-gap-xs); text-align: left; }
     .cd-row[role="button"] { cursor: pointer; }
-    .cd-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cd-gap-md); }
-    .cd-row-title { display: flex; gap: var(--cd-gap-sm); align-items: baseline; flex-wrap: wrap; }
-    .cd-row-right { display: inline-flex; align-items: center; gap: var(--cd-gap-sm); }
-    .cd-session-close { padding: var(--cd-gap-micro) 10px; line-height: 1.4; border-radius: var(--cd-radius-sm); font-size: 0.8em; }
-    .cd-row-bottom { display: flex; gap: var(--cd-gap-md); margin-top: var(--cd-gap-xs); padding-top: var(--cd-gap-xs); border-top: 1px solid var(--cd-border); flex-wrap: wrap; }
+    .cd-row-top { display: flex; align-items: last baseline; justify-content: space-between; gap: var(--cd-gap-sm); }
+    .cd-row-title { display: flex; gap: var(--cd-gap-sm); align-items: baseline; flex-wrap: wrap; min-width: 0; font-size: 1.05em; }
+    .cd-row-right { display: inline-flex; align-items: center; gap: var(--cd-gap-xs); flex-shrink: 0; }
+    .cd-row-bottom { display: flex; gap: var(--cd-gap-sm); padding-top: var(--cd-gap-xs); border-top: 1px solid var(--cd-border); flex-wrap: wrap; }
     .cd-workspace-path {
-      width: 100%;
+      flex: 1;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -304,7 +371,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
 
     .cd-outline-warn { border: 1px solid var(--cd-yellow); color: var(--cd-yellow); background: transparent; }
     .cd-outline-ok { border: 1px solid var(--cd-green); color: var(--cd-green); background: transparent; }
-    .cd-ws-item { display: flex !important; align-items: center; gap: var(--cd-gap-sm); cursor: pointer; }
+    .cd-ws-item { display: flex !important; flex-direction: row; align-items: center; gap: var(--cd-gap-sm); cursor: pointer; padding: var(--cd-gap-xs) var(--cd-gap-sm); }
     .cd-ws-remove {
       border: none;
       background: transparent;
@@ -318,10 +385,6 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       min-height: var(--cd-click-min);
     }
     .cd-ws-remove:hover { opacity: 1; color: var(--cd-red); }
-    .cd-strong { font-weight: 700; }
-    .cd-muted { opacity: .7; }
-    .cd-small { font-size: 0.85em; }
-    .cd-empty { padding: var(--cd-gap-sm) var(--cd-gap-xs); }
     .cd-setup {
       height: 100%;
       width: 100%;
@@ -348,9 +411,11 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-install-btn code {
       font-weight: 700;
     }
-    .cd-install-hint {
-      margin-top: var(--cd-gap-xs-plus);
-    }
+    .cd-docker-image-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--cd-gap-xs); }
+    .cd-docker-image-label { font-weight: 600; opacity: .8; white-space: nowrap; }
+    .cd-docker-image-input { background: transparent; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-sm); padding: var(--cd-gap-xs) var(--cd-gap-sm); color: inherit; font-family: var(--cd-font-mono); font-size: 0.85em; min-width: 200px; }
+    .cd-docker-image-input:focus { outline: none; border-color: var(--cd-green-border); }
+
 
     .cd-group { border: 1px solid var(--cd-border); border-radius: var(--cd-radius); padding: var(--cd-gap-sm); margin-bottom: var(--cd-gap-sm); }
     .cd-group summary { list-style: none; }
@@ -360,8 +425,6 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-group-chevron { display: inline-block; width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 7px; border-color: transparent transparent transparent currentColor; opacity: .6; transition: transform .15s ease; flex-shrink: 0; margin-left: var(--cd-gap-micro); margin-right: var(--cd-gap-micro); }
     .cd-group[open] > .cd-group-summary > .cd-group-chevron { transform: rotate(90deg); }
     .cd-group-actions { margin-left: auto; display: inline-flex; align-items: center; gap: var(--cd-gap-sm); }
-    .cd-group-new { padding: var(--cd-gap-micro) 10px; line-height: 1.4; border-radius: var(--cd-radius-sm); font-size: 0.8em; }
-
     .cd-todos { margin: var(--cd-gap-xs) 0 0 0; padding-top: var(--cd-gap-sm); border-top: 1px solid var(--cd-border); display: flex; flex-direction: column; gap: var(--cd-gap-micro); list-style: none; padding-left: 0; }
     p.cd-setup-text { margin: 0; }
     .cd-todo { display: flex; gap: var(--cd-gap-sm); align-items: flex-start; }
@@ -391,6 +454,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   private cfg: ConfigService
   private notifications: NotificationsService
   private cdr: ChangeDetectorRef
+  private zone: NgZone
   private lifecycle: ClaudeDockLifecycleService
   private closeGuard: ClaudeCloseGuardService
 
@@ -415,6 +479,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   readonly installHooksCommand = 'node scripts/install.js'
   installRunning = false
   installOutput = ''
+  wsCollapsed = false
   private groupOpenState: Record<string, boolean> = {}
   private viewReady = false
 
@@ -424,6 +489,7 @@ export class DashboardTabComponent extends BaseTabComponent {
     this.cfg = injector.get(ConfigService)
     this.notifications = injector.get(NotificationsService)
     this.cdr = injector.get(ChangeDetectorRef)
+    this.zone = injector.get(NgZone)
     this.lifecycle = injector.get(ClaudeDockLifecycleService)
     this.closeGuard = injector.get(ClaudeCloseGuardService)
 
@@ -434,7 +500,7 @@ export class DashboardTabComponent extends BaseTabComponent {
     this.runtimeSvc = injector.get(SessionRuntimeService)
     this.workspacesSvc = injector.get(WorkspacesService)
 
-    this.setTitle('Claude Code')
+    this.setTitle('Claude Dock')
     this.icon = 'fas fa-table'
     // Prevent user from renaming this tab via Tabby's rename-tab dialog.
     Object.defineProperty(this, 'customTitle', { get: () => '', set: () => {} })
@@ -443,27 +509,29 @@ export class DashboardTabComponent extends BaseTabComponent {
     this.sortPreset = ((this.cfg as any).store?.claudeDock?.sortPreset ?? 'status') as SortPreset
     this.groupSortPreset = ((this.cfg as any).store?.claudeDock?.groupSortPreset ?? 'waiting') as GroupSortPreset
 
-    this.subscribeUntilDestroyed(this.events.sessions$, () => this.recompute())
-    this.subscribeUntilDestroyed(this.cfg.changed$, () => this.onConfigChanged())
-    this.subscribeUntilDestroyed(this.todosSvc.todosChanged$, () => this.detectChanges())
-    this.subscribeUntilDestroyed(this.usageSvc.summary$, (s: UsageSummary | null) => {
-      this.usage = s
-      this.detectChanges()
-    })
-    this.subscribeUntilDestroyed(this.hookHealthSvc.status$, (s: HookHealthStatus) => {
-      this.hookHealth = s
-      this.detectChanges()
-    })
-    this.subscribeUntilDestroyed(this.focused$, () => {
-      this.hookHealthSvc.checkNow()
-    })
-    this.subscribeUntilDestroyed(this.runtimeSvc.stats$, (s: Record<number, any>) => {
-      this.runtimeStats = s ?? {}
-      this.recompute()
-    })
-    this.subscribeUntilDestroyed(this.runtimeSvc.system$, (s: SystemResourceStat | null) => {
-      this.systemStats = s
-      this.detectChanges()
+    this.zone.runOutsideAngular(() => {
+      this.subscribeUntilDestroyed(this.events.sessions$, () => this.recompute())
+      this.subscribeUntilDestroyed(this.cfg.changed$, () => this.onConfigChanged())
+      this.subscribeUntilDestroyed(this.todosSvc.todosChanged$, () => this.scheduleCD())
+      this.subscribeUntilDestroyed(this.usageSvc.summary$, (s: UsageSummary | null) => {
+        this.usage = s
+        this.scheduleCD()
+      })
+      this.subscribeUntilDestroyed(this.hookHealthSvc.status$, (s: HookHealthStatus) => {
+        this.hookHealth = s
+        this.scheduleCD()
+      })
+      this.subscribeUntilDestroyed(this.focused$, () => {
+        this.hookHealthSvc.checkNow()
+      })
+      this.subscribeUntilDestroyed(this.runtimeSvc.stats$, (s: Record<number, any>) => {
+        this.runtimeStats = s ?? {}
+        this.recompute()
+      })
+      this.subscribeUntilDestroyed(this.runtimeSvc.system$, (s: SystemResourceStat | null) => {
+        this.systemStats = s
+        this.scheduleCD()
+      })
     })
 
     this.hookHealthSvc.checkNow()
@@ -500,7 +568,7 @@ export class DashboardTabComponent extends BaseTabComponent {
 
   private refreshWorkspaces (): void {
     this.workspaces = this.workspacesSvc.list()
-    this.detectChanges()
+    this.scheduleCD()
   }
 
   setSortPreset (preset: SortPreset): void {
@@ -823,15 +891,20 @@ export class DashboardTabComponent extends BaseTabComponent {
     const sessions = this.visibleRuntimeSessions()
     this.sessionsSorted = this.sortSessions(sessions)
     this.groupsSorted = this.buildGroups(this.sessionsSorted)
-    this.detectChanges()
+    this.scheduleCD()
   }
 
-  private detectChanges (): void {
-    if (!this.viewReady) return
-    try {
-      // Tabby uses default change detection, but file polling events arrive outside user actions.
-      this.cdr.detectChanges()
-    } catch { }
+  private cdQueued = false
+
+  /** Coalesce detectChanges via rAF: max 1 render per animation frame. */
+  private scheduleCD (): void {
+    if (this.cdQueued || !this.viewReady) return
+    this.cdQueued = true
+    requestAnimationFrame(() => {
+      this.cdQueued = false
+      if (!this.viewReady) return
+      try { this.cdr.detectChanges() } catch { }
+    })
   }
 
   async openWorkspaceFolder (): Promise<void> {
@@ -868,7 +941,7 @@ export class DashboardTabComponent extends BaseTabComponent {
     const pluginRoot = path.resolve(__dirname, '..', '..')
     this.installRunning = true
     this.installOutput = 'Installing...'
-    this.detectChanges()
+    this.scheduleCD()
 
     try {
       const result = await new Promise<string>((resolve, reject) => {
@@ -892,8 +965,21 @@ export class DashboardTabComponent extends BaseTabComponent {
       this.notifications.error('Hook install failed', String(e?.message ?? e))
     } finally {
       this.installRunning = false
-      this.detectChanges()
+      this.scheduleCD()
     }
+  }
+
+  get defaultDockerImage (): string {
+    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:0.1.0'
+  }
+
+  setDefaultDockerImage (value: string): void {
+    const store = (this.cfg as any).store
+    if (!store) return
+    store.claudeDock ??= {}
+    const trimmed = value.trim()
+    store.claudeDock.defaultDockerImage = trimmed || 'ghcr.io/troshab/claude-dock:0.1.0'
+    this.cfg.save()
   }
 
   removeWorkspace (id: string, event?: Event): void {

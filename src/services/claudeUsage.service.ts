@@ -58,16 +58,16 @@ export class ClaudeUsageService {
     this.tick().catch(() => null)
   }
 
-  private readJsonFile (filePath: string): any | null {
+  private async readJsonFile (filePath: string): Promise<any | null> {
     try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+      return JSON.parse(await fs.promises.readFile(filePath, 'utf8'))
     } catch {
       return null
     }
   }
 
-  private readCredentials (): any | null {
-    return this.readJsonFile(this.credentialsPath)?.claudeAiOauth ?? null
+  private async readCredentials (): Promise<any | null> {
+    return (await this.readJsonFile(this.credentialsPath))?.claudeAiOauth ?? null
   }
 
   private async postForm (url: string, form: URLSearchParams, headers: Record<string, string>): Promise<{ status: number, body: string }> {
@@ -111,10 +111,12 @@ export class ClaudeUsageService {
     })
   }
 
-  private saveCredentials (oauth: any): void {
+  private async saveCredentials (oauth: any): Promise<void> {
     try {
-      fs.writeFileSync(this.credentialsPath, JSON.stringify({ claudeAiOauth: oauth }))
-    } catch { }
+      await fs.promises.writeFile(this.credentialsPath, JSON.stringify({ claudeAiOauth: oauth }))
+    } catch (e: any) {
+      console.warn('[claude-dock] saveCredentials failed:', e?.message ?? e)
+    }
   }
 
   private isExpired (oauth: any): boolean {
@@ -153,7 +155,7 @@ export class ClaudeUsageService {
       refreshToken: parsed.refresh_token || oauth.refreshToken,
       expiresAt: Date.now() + (Number(parsed.expires_in ?? 0) * 1000),
     }
-    this.saveCredentials(next)
+    await this.saveCredentials(next)
     return next
   }
 
@@ -191,7 +193,7 @@ export class ClaudeUsageService {
 
     this.remotePollInFlight = true
     try {
-      let oauth = this.readCredentials()
+      let oauth = await this.readCredentials()
       if (!oauth?.accessToken) {
         this.cachedRemoteUsage = null
         this.remoteNextPollAt = Date.now() + 60_000
@@ -230,10 +232,10 @@ export class ClaudeUsageService {
     }
   }
 
-  private updatePlanCache (): void {
+  private async updatePlanCache (): Promise<void> {
     let stat: fs.Stats
     try {
-      stat = fs.statSync(this.credentialsPath)
+      stat = await fs.promises.stat(this.credentialsPath)
     } catch {
       this.cachedPlan = null
       return
@@ -243,7 +245,7 @@ export class ClaudeUsageService {
     }
     this.lastCredsMtimeMs = stat.mtimeMs
 
-    const raw = this.readJsonFile(this.credentialsPath)
+    const raw = await this.readJsonFile(this.credentialsPath)
     const oauth = raw?.claudeAiOauth
     if (!oauth || typeof oauth !== 'object') {
       this.cachedPlan = null
@@ -273,10 +275,10 @@ export class ClaudeUsageService {
     return `Session limit reached (resets ${m[1].trim()})`
   }
 
-  private updateLimitHintCache (): void {
+  private async updateLimitHintCache (): Promise<void> {
     let stat: fs.Stats
     try {
-      stat = fs.statSync(this.historyPath)
+      stat = await fs.promises.stat(this.historyPath)
     } catch {
       this.cachedLimitHint = null
       return
@@ -289,23 +291,24 @@ export class ClaudeUsageService {
     // Tail read to avoid scanning huge history files.
     const tailBytes = 512 * 1024
     const start = Math.max(0, stat.size - tailBytes)
-    const fd = fs.openSync(this.historyPath, 'r')
+    let fh: fs.promises.FileHandle | null = null
     try {
+      fh = await fs.promises.open(this.historyPath, 'r')
       const buf = Buffer.alloc(stat.size - start)
-      fs.readSync(fd, buf, 0, buf.length, start)
+      await fh.read(buf, 0, buf.length, start)
       const text = buf.toString('utf8')
       this.cachedLimitHint = this.extractLimitResetHintFromHistoryTail(text)
     } catch {
       this.cachedLimitHint = null
     } finally {
-      try { fs.closeSync(fd) } catch { }
+      await fh?.close()
     }
   }
 
-  private updateStatsCache (): void {
+  private async updateStatsCache (): Promise<void> {
     let stat: fs.Stats
     try {
-      stat = fs.statSync(this.statsPath)
+      stat = await fs.promises.stat(this.statsPath)
     } catch {
       this.cachedStats = null
       return
@@ -315,7 +318,7 @@ export class ClaudeUsageService {
     }
     this.lastStatsMtimeMs = stat.mtimeMs
 
-    const raw = this.readJsonFile(this.statsPath)
+    const raw = await this.readJsonFile(this.statsPath)
     if (!raw || typeof raw !== 'object') {
       this.cachedStats = null
       return
@@ -341,9 +344,9 @@ export class ClaudeUsageService {
   private async tick (): Promise<void> {
     await this.pollRemoteUsageIfDue()
 
-    this.updatePlanCache()
-    this.updateLimitHintCache()
-    this.updateStatsCache()
+    await this.updatePlanCache()
+    await this.updateLimitHintCache()
+    await this.updateStatsCache()
 
     const stats: Partial<UsageSummary> = this.cachedStats ?? {
       statsAvailable: false,

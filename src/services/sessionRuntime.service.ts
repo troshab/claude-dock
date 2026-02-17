@@ -50,6 +50,10 @@ export class SessionRuntimeService {
   private lastSignature = ''
   private prevCpuTimes: { idle: number, total: number } | null = null
 
+  // Docker container tracking — virtual (negative) PIDs
+  private trackedContainers = new Map<string, number>()  // name -> virtualPid
+  private nextVirtualPid = -1
+
   constructor (injector: Injector) {
     this.events = injector.get(ClaudeEventsService)
     this.debug = injector.get(TabbyDebugService)
@@ -191,7 +195,8 @@ export class SessionRuntimeService {
 
   private async tick (): Promise<void> {
     const tracked = [...this.trackedPids.values()].sort((a, b) => a - b)
-    if (!tracked.length) {
+    const hasContainers = this.trackedContainers.size > 0
+    if (!tracked.length && !hasContainers) {
       if (Object.keys(this.stats$.value).length) {
         this.stats$.next({})
       }
@@ -238,6 +243,32 @@ export class SessionRuntimeService {
         processName: snap.processName,
         memoryBytes: snap.memoryBytes ?? 0,
         cpuPercent: Math.max(0, cpuPercent),
+      }
+    }
+
+    // Docker container stats (single exec call for all containers)
+    if (hasContainers) {
+      const dockerSnaps = await this.readDockerSnapshots()
+      for (const [name, vPid] of this.trackedContainers) {
+        const ds = dockerSnaps.get(name)
+        if (ds) {
+          next[vPid] = {
+            pid: vPid,
+            running: true,
+            sampledAt: now,
+            processName: `docker:${name}`,
+            cpuPercent: Math.max(0, ds.cpu),
+            memoryBytes: ds.mem,
+          }
+        } else {
+          next[vPid] = {
+            pid: vPid,
+            running: false,
+            sampledAt: now,
+            cpuPercent: 0,
+            memoryBytes: 0,
+          }
+        }
       }
     }
 
@@ -294,9 +325,70 @@ export class SessionRuntimeService {
     })
   }
 
+  // --- Docker container tracking ---
+
+  trackContainer (name: string): number {
+    const existing = this.trackedContainers.get(name)
+    if (existing !== undefined) return existing
+    const vPid = this.nextVirtualPid--
+    this.trackedContainers.set(name, vPid)
+    this.debug.log('runtime.container.track', { name, virtual_pid: vPid })
+    return vPid
+  }
+
+  untrackContainer (name: string): void {
+    const vPid = this.trackedContainers.get(name)
+    if (vPid === undefined) return
+    this.trackedContainers.delete(name)
+    // Remove stale stat entry
+    const cur = this.stats$.value
+    if (cur[vPid]) {
+      const next = { ...cur }
+      delete next[vPid]
+      this.stats$.next(next)
+    }
+    this.debug.log('runtime.container.untrack', { name, virtual_pid: vPid })
+  }
+
+  getContainerStat (name: string): SessionRuntimeStat | null {
+    const vPid = this.trackedContainers.get(name)
+    if (vPid === undefined) return null
+    return this.stats$.value[vPid] ?? null
+  }
+
+  private async readDockerSnapshots (): Promise<Map<string, { cpu: number, mem: number }>> {
+    const result = new Map<string, { cpu: number, mem: number }>()
+    const names = [...this.trackedContainers.keys()]
+    if (!names.length) return result
+
+    const { stdout } = await execFileAsync('docker', [
+      'stats', '--no-stream', '--format', '{{json .}}', ...names,
+    ], { timeout: 8000 }).catch((e: any) => {
+      this.debug.log('runtime.docker.exec_failed', {
+        error: String(e?.message ?? e).slice(0, 400),
+        names,
+      })
+      return { stdout: '' } as any
+    })
+
+    const text = String(stdout ?? '').trim()
+    if (!text) return result
+
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const obj = this.parseJSON(trimmed)
+      if (!obj?.Name) continue
+      const cpu = parseFloat(String(obj.CPUPerc ?? '').replace('%', '')) || 0
+      const mem = parseDockerMem(String(obj.MemUsage ?? ''))
+      result.set(obj.Name, { cpu, mem })
+    }
+    return result
+  }
+
   getStat (pid?: number | null): SessionRuntimeStat | null {
     const p = Number(pid)
-    if (!Number.isFinite(p) || p <= 0) {
+    if (!Number.isFinite(p) || p === 0) {
       return null
     }
     return this.stats$.value[p] ?? null
@@ -323,5 +415,25 @@ export class SessionRuntimeService {
       this.debug.log('runtime.kill.failed', { pid: p, error: String(e?.message ?? e) })
       return false
     }
+  }
+}
+
+/** Parse docker stats MemUsage field like "123.4MiB / 8GiB" -> bytes (first part only). */
+function parseDockerMem (s: string): number {
+  const m = s.match(/^([\d.]+)\s*(B|KiB|MiB|GiB|TiB|kB|MB|GB|TB)/i)
+  if (!m) return 0
+  const val = parseFloat(m[1])
+  if (!Number.isFinite(val)) return 0
+  switch (m[2]) {
+    case 'B': return val
+    case 'KiB': return val * 1024
+    case 'MiB': return val * 1024 * 1024
+    case 'GiB': return val * 1024 * 1024 * 1024
+    case 'TiB': return val * 1024 * 1024 * 1024 * 1024
+    case 'kB': return val * 1000
+    case 'MB': return val * 1e6
+    case 'GB': return val * 1e9
+    case 'TB': return val * 1e12
+    default: return 0
   }
 }

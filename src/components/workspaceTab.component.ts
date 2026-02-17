@@ -1,16 +1,17 @@
-import { ChangeDetectorRef, Component, ElementRef, Injector, Input, ViewChild, ViewContainerRef } from '@angular/core'
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, Injector, Input, NgZone, ViewChild, ViewContainerRef } from '@angular/core'
 import { AppService, BaseTabComponent, ConfigService, LogService, Logger, NotificationsService, ProfilesService, TabsService } from 'tabby-core'
 import * as childProcess from 'child_process'
 import * as fsSync from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
+import { resolveForPty, cleanEnv, ResolvedCommand } from '../launch'
 import { WorkspacesService } from '../services/workspaces.service'
 import { ClaudeEventsService } from '../services/claudeEvents.service'
 import { ClaudeCloseGuardService } from '../services/closeGuard.service'
 import { ClaudeDockLifecycleService } from '../services/lifecycle.service'
 import { ClaudeUsageService } from '../services/claudeUsage.service'
-import { SessionRuntimeService, SystemResourceStat } from '../services/sessionRuntime.service'
+import { SessionRuntimeService } from '../services/sessionRuntime.service'
 import { TabbyDebugService } from '../services/tabbyDebug.service'
 import { WorkspaceTerminalRegistryService } from '../services/workspaceTerminalRegistry.service'
 import { ClaudeSession, SavedTerminal, UsageSummary, Workspace } from '../models'
@@ -21,6 +22,10 @@ interface InternalTerminalSubTab {
   title: string
   createdAt: number
   tab: BaseTabComponent
+  /** Docker sandbox name, if launched via docker sandbox run. Used for cleanup. */
+  sandboxName?: string
+  /** Virtual (negative) PID for Docker container stats lookup. */
+  virtualPid?: number
 }
 
 interface ResumeCandidate {
@@ -32,6 +37,7 @@ interface ResumeCandidate {
 
 @Component({
   selector: 'claude-dock-workspace-tab',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="cd-ws-header">
       <div class="cd-ws-top-row">
@@ -47,24 +53,14 @@ interface ResumeCandidate {
           <button class="btn btn-sm btn-outline-secondary" [disabled]="!selectedResumeSessionId" (click)="resumeClaude()">Resume</button>
           <button class="btn btn-sm btn-outline-success" (click)="newTerminal()">New terminal</button>
         </div>
-        <div class="cd-ws-meters" *ngIf="systemStats || usage">
-          <div class="cd-ws-meters-row" *ngIf="systemStats">
-            <div class="cd-ws-usage-item" aria-label="System CPU load">
-              <span class="cd-ws-usage-label">CPU</span>
-              <div class="cd-ws-usage-bar" role="meter" aria-label="CPU load" [attr.aria-valuenow]="clamp(systemStats?.cpuLoadPercent)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cd-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.cpuLoadPercent)"></div>
-              </div>
-              <span class="cd-ws-usage-val">{{ cpuLabel() }}</span>
-            </div>
-            <div class="cd-ws-usage-item" aria-label="System RAM usage">
-              <span class="cd-ws-usage-label">RAM</span>
-              <div class="cd-ws-usage-bar" role="meter" aria-label="RAM usage" [attr.aria-valuenow]="clamp(systemStats?.usedMemoryPercent)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cd-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.usedMemoryPercent)"></div>
-              </div>
-              <span class="cd-ws-usage-val">{{ ramLabel() }}</span>
-            </div>
-          </div>
-          <div class="cd-ws-meters-row" *ngIf="usage">
+        <div class="cd-ws-runtime" role="region" aria-label="Workspace resources" *ngIf="wsStats.count">
+          <span class="cd-ws-rt-name">CPU</span>
+          <span class="cd-ws-rt-value">{{ wsCpuLabel() }}</span>
+          <span class="cd-ws-rt-name cd-ws-rt-sep">RAM</span>
+          <span class="cd-ws-rt-value">{{ wsRamLabel() }}</span>
+        </div>
+        <div class="cd-ws-meters" *ngIf="usage">
+          <div class="cd-ws-meters-row">
             <div class="cd-ws-usage-item" aria-label="5-hour usage window">
               <span class="cd-ws-usage-label">5h</span>
               <div class="cd-ws-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
@@ -98,6 +94,11 @@ interface ResumeCandidate {
             (change)="toggleDockerSandbox($any($event.target).checked)">
           <span>Docker sandbox</span>
         </label>
+        <input class="cd-ws-image-input" type="text" aria-label="Docker image"
+          [placeholder]="defaultDockerImage" [value]="workspaceDockerImage"
+          [disabled]="!useDockerSandbox"
+          (change)="onDockerImageChanged($any($event.target).value)"
+          (blur)="onDockerImageChanged($any($event.target).value)">
         <label class="cd-ws-chk" [ngClass]="mountChkColor" [class.cd-ws-chk-disabled]="!useDockerSandbox">
           <input type="checkbox" [checked]="mountClaudeDir" [disabled]="!useDockerSandbox"
             (change)="toggleMountClaude($any($event.target).checked)">
@@ -108,6 +109,17 @@ interface ResumeCandidate {
             (change)="toggleSkipPermissions($any($event.target).checked)">
           <span>Dangerously skip permissions</span>
         </label>
+        <span class="cd-ws-ports" [class.cd-ws-ports-disabled]="!useDockerSandbox" *ngIf="forwardPorts.length || useDockerSandbox">
+          <span class="cd-ws-ports-label">Ports forwarded to Docker's localhost:</span>
+          <span class="cd-port-tag" *ngFor="let p of forwardPorts">
+            {{ p }}<button class="cd-port-rm" [disabled]="!useDockerSandbox" (click)="removePort(p)">&times;</button>
+          </span>
+          <input class="cd-port-input" type="text" placeholder="port" aria-label="Add forwarded port"
+            size="5" maxlength="5" [disabled]="!useDockerSandbox"
+            (keydown.enter)="addPortFromInput($event)"
+            (blur)="addPortFromInput($event)">
+          <span class="cd-port-hook">(19542 port binded for Claude Dock hook's)</span>
+        </span>
       </div>
     </header>
 
@@ -192,8 +204,56 @@ interface ResumeCandidate {
     .cd-ws-chk-disabled { opacity: .35; pointer-events: none; }
     .cd-ws-chk-green  { opacity: 1; color: var(--cd-green); }  .cd-ws-chk-green  input { accent-color: var(--cd-green); }
     .cd-ws-chk-yellow { opacity: 1; color: var(--cd-yellow); }  .cd-ws-chk-yellow input { accent-color: var(--cd-yellow); }
+
+    .cd-ws-ports { display: inline-flex; align-items: center; gap: var(--cd-gap-xs); flex-wrap: wrap; }
+    .cd-ws-ports-disabled { opacity: .35; pointer-events: none; }
+    .cd-ws-ports-label { opacity: .7; font-weight: 600; }
+    .cd-port-tag {
+      display: inline-flex; align-items: center; gap: var(--cd-gap-micro);
+      padding: var(--cd-gap-micro) var(--cd-gap-xs-plus);
+      background: var(--cd-green-subtle); border: 1px solid var(--cd-green-border);
+      border-radius: var(--cd-radius-pill); font-size: 0.85em; font-weight: 600;
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .cd-port-rm {
+      border: none; background: transparent; color: inherit; opacity: .6;
+      cursor: pointer; padding: 0 var(--cd-gap-micro); line-height: 1; font-size: 1.1em;
+    }
+    .cd-port-rm:hover { opacity: 1; }
+    .cd-port-input {
+      width: 52px; padding: var(--cd-gap-micro) var(--cd-gap-xs);
+      background: transparent; border: 1px solid var(--cd-border-light);
+      border-radius: var(--cd-radius-sm); color: inherit; font: inherit; font-size: 0.85em;
+      text-align: center;
+    }
+    .cd-port-input::placeholder { opacity: .4; }
+    .cd-port-hook { opacity: .35; font-size: 0.8em; font-style: italic; white-space: nowrap; }
+    .cd-ws-image-input {
+      width: 260px; max-width: 100%; padding: var(--cd-gap-micro) var(--cd-gap-xs);
+      background: transparent; border: 1px solid var(--cd-border-light);
+      border-radius: var(--cd-radius-sm); color: inherit; font: inherit; font-size: 0.85em;
+    }
+    .cd-ws-image-input:disabled { opacity: .35; }
+    .cd-ws-image-input::placeholder { opacity: .4; }
     .cd-ws-chk-orange { opacity: 1; color: var(--cd-orange); }  .cd-ws-chk-orange input { accent-color: var(--cd-orange); }
     .cd-ws-chk-red    { opacity: 1; color: var(--cd-red); }  .cd-ws-chk-red    input { accent-color: var(--cd-red); }
+
+    .cd-ws-runtime {
+      display: grid;
+      grid-template-columns: auto auto auto auto;
+      align-content: center;
+      gap: var(--cd-gap-micro) var(--cd-gap-xs-plus);
+      padding: var(--cd-gap-xs) var(--cd-gap-sm);
+      border: 1px solid var(--cd-green-border);
+      border-radius: var(--cd-radius);
+      font-weight: 600;
+      background: var(--cd-green-subtle);
+      white-space: nowrap;
+      flex-shrink: 1;
+    }
+    .cd-ws-rt-name { opacity: .9; }
+    .cd-ws-rt-value { text-align: right; font-variant-numeric: tabular-nums; }
+    .cd-ws-rt-sep { padding-left: var(--cd-gap-sm); border-left: 1px solid var(--cd-border-light); }
 
     .cd-ws-meters { display: flex; flex-direction: row; gap: var(--cd-gap-sm); flex-shrink: 0; }
     .cd-ws-meters-row { display: flex; gap: var(--cd-gap-sm); align-items: center; }
@@ -316,13 +376,14 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private usageSvc: ClaudeUsageService
   private terminalRegistry: WorkspaceTerminalRegistryService
   private cdr: ChangeDetectorRef
+  private zone: NgZone
   private hostRef: ElementRef
   private logger: Logger
 
   terminals: InternalTerminalSubTab[] = []
   activeTerminalId: string | null = null
   usage: UsageSummary | null = null
-  systemStats: SystemResourceStat | null = null
+  wsStats: { cpu: number, mem: number, count: number } = { cpu: 0, mem: 0, count: 0 }
   resumeOptions: ResumeCandidate[] = []
   selectedResumeSessionId = ''
   branches: string[] = []
@@ -330,7 +391,18 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private lastResumeDebugSig = ''
   private promptCache = new Map<string, string>()
   private lastProjectDirMtimeMs = 0
+  private cdQueued = false
 
+  /** Coalesce detectChanges via rAF: max 1 render per animation frame. */
+  private scheduleCD (): void {
+    if (this.cdQueued || !this.viewReady) return
+    this.cdQueued = true
+    requestAnimationFrame(() => {
+      this.cdQueued = false
+      if (!this.viewReady) return
+      try { this.cdr.detectChanges() } catch { }
+    })
+  }
 
   constructor (injector: Injector) {
     super(injector)
@@ -348,6 +420,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.usageSvc = injector.get(ClaudeUsageService)
     this.terminalRegistry = injector.get(WorkspaceTerminalRegistryService)
     this.cdr = injector.get(ChangeDetectorRef)
+    this.zone = injector.get(NgZone)
     this.hostRef = injector.get(ElementRef)
     this.logger = injector.get(LogService).create('claude-dock')
 
@@ -361,24 +434,25 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     // Workspace data can appear after the tab is created (config loads, inputs assigned).
     // Debounce to avoid feedback loop: cfg.save() -> changed$ -> loadWorkspace -> refreshBranches -> repeat
     let loadTimer: any
-    this.subscribeUntilDestroyed(this.cfg.changed$, () => {
-      clearTimeout(loadTimer)
-      loadTimer = setTimeout(() => this.loadWorkspace(), 300)
-    })
-    this.subscribeUntilDestroyed(this.events.sessions$, () => {
-      this.refreshResumeOptions()
-      this.saveTerminalState()
-    })
-    this.subscribeUntilDestroyed(this.usageSvc.summary$, (s: UsageSummary | null) => {
-      this.usage = s
-      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
-    })
-    this.subscribeUntilDestroyed(this.runtimeSvc.stats$, () => {
-      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
-    })
-    this.subscribeUntilDestroyed(this.runtimeSvc.system$, (s: SystemResourceStat | null) => {
-      this.systemStats = s
-      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+    this.zone.runOutsideAngular(() => {
+      this.subscribeUntilDestroyed(this.cfg.changed$, () => {
+        clearTimeout(loadTimer)
+        loadTimer = setTimeout(() => this.loadWorkspace(), 300)
+      })
+      this.subscribeUntilDestroyed(this.events.sessions$, () => {
+        this.refreshResumeOptions().catch(() => null)
+        this.saveTerminalState()
+        this.recomputeWsStats()
+        this.scheduleCD()
+      })
+      this.subscribeUntilDestroyed(this.usageSvc.summary$, (s: UsageSummary | null) => {
+        this.usage = s
+        this.scheduleCD()
+      })
+      this.subscribeUntilDestroyed(this.runtimeSvc.stats$, () => {
+        this.recomputeWsStats()
+        this.scheduleCD()
+      })
     })
 
     // Forward focus/visibility to the embedded terminal so keyboard and rendering behave.
@@ -490,9 +564,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       cwd: ws?.cwd ?? null,
       profile_id: ws?.profileId ?? null,
     })
-    this.refreshResumeOptions()
+    this.refreshResumeOptions().catch(() => null)
     this.refreshBranches()
-    if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+    this.scheduleCD()
   }
 
   normalizeCwd (cwd: string): string {
@@ -529,6 +603,48 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   toggleSkipPermissions (checked: boolean): void {
     this.workspaces.updateWorkspace(this.workspaceId, { dangerouslySkipPermissions: checked })
+    this.loadWorkspace()
+  }
+
+  get defaultDockerImage (): string {
+    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:0.1.0'
+  }
+
+  get workspaceDockerImage (): string {
+    return this.workspace?.dockerImage || ''
+  }
+
+  /** Effective image: workspace override or global default. */
+  get effectiveDockerImage (): string {
+    return this.workspaceDockerImage || this.defaultDockerImage
+  }
+
+  onDockerImageChanged (value: string): void {
+    const trimmed = (value ?? '').trim()
+    this.workspaces.updateWorkspace(this.workspaceId, { dockerImage: trimmed || undefined })
+    this.loadWorkspace()
+  }
+
+  get forwardPorts (): number[] {
+    return this.workspace?.forwardPorts ?? []
+  }
+
+  addPortFromInput (event: Event): void {
+    const input = event.target as HTMLInputElement
+    const raw = (input.value ?? '').trim()
+    if (!raw) return
+    const port = parseInt(raw, 10)
+    if (!Number.isFinite(port) || port < 1 || port > 65535) return
+    input.value = ''
+    const current = this.forwardPorts
+    if (current.includes(port)) return
+    this.workspaces.updateWorkspace(this.workspaceId, { forwardPorts: [...current, port].sort((a, b) => a - b) })
+    this.loadWorkspace()
+  }
+
+  removePort (port: number): void {
+    const next = this.forwardPorts.filter(p => p !== port)
+    this.workspaces.updateWorkspace(this.workspaceId, { forwardPorts: next })
     this.loadWorkspace()
   }
 
@@ -584,7 +700,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         this.branches = parsed
         this.currentBranch = current
       }
-      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+      this.scheduleCD()
     })
   }
 
@@ -592,54 +708,96 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const cwd = this.workspace?.cwd
     if (!cwd || !name) return
     const prev = this.currentBranch
-    try {
-      childProcess.execFileSync('git', ['checkout', name], { cwd, encoding: 'utf8', timeout: 10000 })
-    } catch (e: any) {
-      const stderr = String(e?.stderr ?? '').trim()
-      const full = stderr || String(e?.message ?? e)
-      const brief = full.split('\n').find(l => l.startsWith('error:')) ?? full.split('\n')[0] ?? full
-      this.logger.warn('git checkout failed:', full)
-      this.notifications.error('Git checkout failed', brief)
-      // Force <select> revert: Angular skips DOM update when model value didn't change
-      this.currentBranch = ''
-      this.cdr.detectChanges()
-      this.currentBranch = prev
-      this.cdr.detectChanges()
-      return
-    }
-    this.refreshBranches()
+    childProcess.execFile('git', ['checkout', name], { cwd, encoding: 'utf8', timeout: 10000 }, (err, _stdout, stderr) => {
+      if (err) {
+        const stderrStr = String(stderr ?? '').trim()
+        const full = stderrStr || String(err?.message ?? err)
+        const brief = full.split('\n').find(l => l.startsWith('error:')) ?? full.split('\n')[0] ?? full
+        this.logger.warn('git checkout failed:', full)
+        this.notifications.error('Git checkout failed', brief)
+        // Force <select> revert: Angular skips DOM update when model value didn't change
+        this.currentBranch = ''
+        this.cdr.detectChanges()
+        this.currentBranch = prev
+        this.cdr.detectChanges()
+        return
+      }
+      this.refreshBranches()
+    })
   }
 
   // --- Launch command builder ---
 
-  /** On Windows node-pty can't spawn .cmd/.bat directly — wrap in cmd.exe /c */
-  private shellWrap (command: string, args: string[]): { command: string, args: string[] } {
-    if (process.platform === 'win32') {
-      return { command: 'cmd.exe', args: ['/c', command, ...args] }
-    }
-    return { command, args }
+  /** Convert Windows path to POSIX format for use inside Docker container.
+   *  C:\Users\tro\project -> /c/Users/tro/project */
+  private toPosixCwd (cwd: string): string {
+    const m = cwd.match(/^([A-Za-z]):[\\\/](.*)$/)
+    if (m) return `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`
+    return cwd.replace(/\\/g, '/')
   }
 
-  private buildLaunchCommand (claudeArgs: string[]): { command: string, args: string[] } {
+  private async buildLaunchCommand (claudeArgs: string[]): Promise<{ resolved: ResolvedCommand, sandboxName?: string, terminalId?: string } | null> {
     const allArgs = [...claudeArgs, ...this.skipPermsArgs()]
     if (this.useDockerSandbox) {
-      const dockerArgs = ['sandbox', 'run', '--name', 'claude-in-docker-sandbox',
-        '-e', 'FORCE_COLOR=3',
-        '-e', `CLAUDE_DOCK_SOURCE=tabby`,
+      const projectName = path.basename(this.workspace?.cwd || 'sandbox')
+        .toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'sandbox'
+      const mountFlag = this.mountClaudeDir ? 'm1' : 'm0'
+      const sandboxName = `claude-dock-${projectName}-${mountFlag}-${this.terminals.length + 1}`
+
+      const cwd = this.workspace?.cwd || ''
+      const posixCwd = this.toPosixCwd(cwd)
+
+      // Generate terminalId early so it can be passed into the container via -e.
+      // The hook script needs CLAUDE_DOCK_SOURCE, CLAUDE_DOCK_TABBY_SESSION, and
+      // CLAUDE_DOCK_TERMINAL_ID to identify sessions as "tabby" source — without
+      // these, sessions are filtered out in trimAndPublish().
+      const terminalId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+
+      // Use docker run (not docker sandbox run) for full control over mounts.
+      // docker sandbox run creates destructive symlinks through bind mounts.
+      const dockerArgs = ['run', '--rm', '-it', '--name', sandboxName,
+        '-v', `${cwd}:${posixCwd}`,
+        '-w', posixCwd,
+        '-e', `CLAUDE_DOCK_CWD=${posixCwd}`,
+        '-e', 'CLAUDE_DOCK_SOURCE=tabby',
+        '-e', `CLAUDE_DOCK_TABBY_SESSION=${this.debug.sessionId}`,
+        '-e', `CLAUDE_DOCK_TERMINAL_ID=${terminalId}`,
       ]
-      if (this.mountClaudeDir) {
-        const claudeDir = path.join(os.homedir(), '.claude')
-        dockerArgs.push('-v', `${claudeDir}:/home/agent/.claude`)
-        // Protect settings.json from being overwritten by Claude inside the container
-        const settingsFile = path.join(claudeDir, 'settings.json')
-        if (fsSync.existsSync(settingsFile)) {
-          dockerArgs.push('-v', `${settingsFile}:/home/agent/.claude/settings.json:ro`)
-        }
+
+      if (process.env.ANTHROPIC_API_KEY) {
+        dockerArgs.push('-e', 'ANTHROPIC_API_KEY')
       }
-      dockerArgs.push('claude', ...allArgs)
-      return this.shellWrap('docker', dockerArgs)
+
+      const ports = this.forwardPorts
+      if (ports.length) {
+        dockerArgs.push('-e', `CLAUDE_DOCK_FORWARD_PORTS=${ports.join(',')}`)
+      }
+
+      if (this.mountClaudeDir) {
+        const home = os.homedir()
+        dockerArgs.push(
+          '-v', `${path.join(home, '.claude')}:/home/agent/.claude`,
+          '-v', `${path.join(home, '.claude.json')}:/home/agent/.claude.json`,
+        )
+      }
+
+      dockerArgs.push(this.effectiveDockerImage, 'claude', ...allArgs)
+
+      const resolved = await resolveForPty('docker', dockerArgs)
+      if (!resolved.found) {
+        this.notifications.error("'docker' not found on PATH",
+          'Install Docker Desktop and ensure docker is on your PATH.')
+      }
+      return { resolved, sandboxName, terminalId }
     }
-    return this.shellWrap('claude', allArgs)
+
+    const resolved = await resolveForPty('claude', allArgs)
+    if (!resolved.found) {
+      this.notifications.error("'claude' not found on PATH",
+        'Install Claude CLI: https://docs.anthropic.com/en/docs/claude-cli')
+      return null
+    }
+    return { resolved }
   }
 
   trackTerminalId (_: number, t: InternalTerminalSubTab): string {
@@ -654,38 +812,56 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     return usageLabel(bucket)
   }
 
-  clamp (v?: number | null): number {
-    const n = Number(v ?? 0)
-    if (!Number.isFinite(n)) return 0
-    return Math.max(0, Math.min(100, n))
+  wsCpuLabel (): string {
+    const { cpu, count } = this.wsStats
+    if (!count) return '0%'
+    return cpu < 10 ? `${cpu.toFixed(1)}%` : `${Math.round(cpu)}%`
   }
 
-  cpuLabel (): string {
-    if (!this.systemStats) return '--'
-    const v = this.systemStats.cpuLoadPercent
-    return v < 10 ? `${v.toFixed(1)}%` : `${Math.round(v)}%`
+  wsRamLabel (): string {
+    const { mem, count } = this.wsStats
+    if (!count) return '0 MB'
+    const mb = mem / (1024 * 1024)
+    return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
   }
 
-  ramLabel (): string {
-    if (!this.systemStats) return '--'
-    const used = this.systemStats.totalMemoryBytes - this.systemStats.freeMemoryBytes
-    const totalGB = this.systemStats.totalMemoryBytes / (1024 * 1024 * 1024)
-    const usedGB = used / (1024 * 1024 * 1024)
-    return `${usedGB.toFixed(1)}/${totalGB.toFixed(0)}`
+  private recomputeWsStats (): void {
+    let cpu = 0, mem = 0, count = 0
+    const sessions = this.events.sessions$.value ?? []
+    for (const t of this.terminals) {
+      let rt: import('../services/sessionRuntime.service').SessionRuntimeStat | null = null
+      if (t.sandboxName) {
+        rt = this.runtimeSvc.getContainerStat(t.sandboxName)
+      } else {
+        const s = sessions.find(x => x.terminalId === t.id)
+        if (s?.hostPid) rt = this.runtimeSvc.getStat(s.hostPid)
+      }
+      if (!rt?.running) continue
+      cpu += Number(rt.cpuPercent ?? 0)
+      mem += Number(rt.memoryBytes ?? 0)
+      count++
+    }
+    this.wsStats = { cpu, mem, count }
   }
 
   subtabRuntime (terminalId: string): string {
-    const sessions = this.events.sessions$.value ?? []
-    const s = sessions.find(x => x.terminalId === terminalId)
-    if (!s) return ''
-    const rt = this.runtimeSvc.getStat(s.hostPid)
+    const t = this.terminals.find(x => x.id === terminalId)
+    if (!t) return ''
+    let rt: import('../services/sessionRuntime.service').SessionRuntimeStat | null = null
+    if (t.sandboxName) {
+      rt = this.runtimeSvc.getContainerStat(t.sandboxName)
+    } else {
+      const sessions = this.events.sessions$.value ?? []
+      const s = sessions.find(x => x.terminalId === terminalId)
+      if (s?.hostPid) rt = this.runtimeSvc.getStat(s.hostPid)
+    }
     if (!rt?.running) return ''
     const cpu = Number(rt.cpuPercent ?? 0)
     const mem = Number(rt.memoryBytes ?? 0)
     const cpuStr = cpu < 10 ? `${cpu.toFixed(1)}%` : `${Math.round(cpu)}%`
     const mb = mem / (1024 * 1024)
     const memStr = mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
-    return `${cpuStr} / ${memStr}`
+    return `CPU ${cpuStr} / RAM ${memStr}`
   }
 
   /** Defensive: hide :host so workspace can't overlay other tabs even if Tabby
@@ -697,7 +873,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       // even when the component itself is hidden.
       const tabBody = this.hostRef.nativeElement.closest('tab-body')
       if (tabBody) tabBody.style.display = 'none'
-    } catch { }
+    } catch (e: any) {
+      this.logger.warn('hideHost failed:', e?.message ?? e)
+    }
   }
 
   private showHost (): void {
@@ -705,7 +883,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       const tabBody = this.hostRef.nativeElement.closest('tab-body')
       if (tabBody) tabBody.style.display = ''
       this.hostRef.nativeElement.style.display = ''
-    } catch { }
+    } catch (e: any) {
+      this.logger.warn('showHost failed:', e?.message ?? e)
+    }
   }
 
   private getActiveTerminal (): BaseTabComponent | null {
@@ -739,7 +919,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         }
         prev?.removeFromContainer?.()
       }
-    } catch { }
+    } catch (e: any) {
+      this.debug.log('workspace.terminal.unmount_prev_failed', { error: String(e?.message ?? e) })
+    }
 
     try {
       this.terminalHost.clear()
@@ -843,12 +1025,20 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         }
         this.mountedTerminalId = null
       }
-    } catch { }
+    } catch (e: any) {
+      this.debug.log('workspace.terminal.close_detach_failed', { terminal_id: id, error: String(e?.message ?? e) })
+    }
 
     try {
       tab.destroy?.()
-    } catch { }
+    } catch (e: any) {
+      this.debug.log('workspace.terminal.destroy_failed', { terminal_id: id, error: String(e?.message ?? e) })
+    }
     this.events.markEndedByTerminalId(id, 'workspace_terminal_closed')
+    if (this.terminals[idx].sandboxName) {
+      this.runtimeSvc.untrackContainer(this.terminals[idx].sandboxName!)
+    }
+    this.cleanupSandbox(this.terminals[idx].sandboxName)
 
     this.terminals.splice(idx, 1)
     this.syncTerminalRegistry()
@@ -869,84 +1059,94 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     return cwd.replace(/[:\\/\.]/g, '-')
   }
 
-  private refreshResumeOptions (): void {
+  private refreshingResumeOptions = false
+
+  private async refreshResumeOptions (): Promise<void> {
     if (!this.workspace?.cwd) {
       if (this.resumeOptions.length) {
         this.resumeOptions = []
         this.selectedResumeSessionId = ''
-        if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+        this.scheduleCD()
       }
       return
     }
+    if (this.refreshingResumeOptions) return
+    this.refreshingResumeOptions = true
 
-    const dir = path.join(os.homedir(), '.claude', 'projects', this.projectDirName(this.workspace.cwd))
-    let dirStat: fsSync.Stats
-    try { dirStat = fsSync.statSync(dir) } catch { return }
-    if (!dirStat.isDirectory()) return
+    try {
+      const dir = path.join(os.homedir(), '.claude', 'projects', this.projectDirName(this.workspace.cwd))
+      let dirStat: fsSync.Stats
+      try { dirStat = await fsSync.promises.stat(dir) } catch { return }
+      if (!dirStat.isDirectory()) return
 
-    // Skip rescan if directory hasn't changed.
-    if (dirStat.mtimeMs === this.lastProjectDirMtimeMs && this.resumeOptions.length) {
-      return
-    }
-    this.lastProjectDirMtimeMs = dirStat.mtimeMs
-
-    // Scan transcript files, sorted by mtime descending.
-    const files: Array<{ sessionId: string, filePath: string, mtimeMs: number }> = []
-    for (const entry of fsSync.readdirSync(dir)) {
-      if (!entry.endsWith('.jsonl')) continue
-      try {
-        const fp = path.join(dir, entry)
-        const st = fsSync.statSync(fp)
-        files.push({ sessionId: entry.slice(0, -6), filePath: fp, mtimeMs: st.mtimeMs })
-      } catch { continue }
-    }
-    files.sort((a, b) => b.mtimeMs - a.mtimeMs)
-
-    const next: ResumeCandidate[] = files.slice(0, 50).map(f => {
-      let firstPrompt = this.promptCache.get(f.sessionId)
-      if (firstPrompt === undefined) {
-        firstPrompt = this.readFirstPrompt(f.filePath)
-        this.promptCache.set(f.sessionId, firstPrompt)
+      // Skip rescan if directory hasn't changed.
+      if (dirStat.mtimeMs === this.lastProjectDirMtimeMs && this.resumeOptions.length) {
+        return
       }
-      return {
+      this.lastProjectDirMtimeMs = dirStat.mtimeMs
+
+      // Scan transcript files, sorted by mtime descending.
+      const entries = await fsSync.promises.readdir(dir)
+      const files: Array<{ sessionId: string, filePath: string, mtimeMs: number }> = []
+      for (const entry of entries) {
+        if (!entry.endsWith('.jsonl')) continue
+        try {
+          const fp = path.join(dir, entry)
+          const st = await fsSync.promises.stat(fp)
+          files.push({ sessionId: entry.slice(0, -6), filePath: fp, mtimeMs: st.mtimeMs })
+        } catch { continue }
+      }
+      files.sort((a, b) => b.mtimeMs - a.mtimeMs)
+
+      const top50 = files.slice(0, 50)
+      // Read first prompts in parallel for uncached entries.
+      await Promise.all(top50.map(async (f) => {
+        if (this.promptCache.has(f.sessionId)) return
+        const prompt = await this.readFirstPrompt(f.filePath)
+        this.promptCache.set(f.sessionId, prompt)
+      }))
+
+      const next: ResumeCandidate[] = top50.map(f => ({
         sessionId: f.sessionId,
         status: 'ended',
         lastEventTs: f.mtimeMs,
-        firstPrompt,
+        firstPrompt: this.promptCache.get(f.sessionId) ?? '',
+      }))
+
+      // Prune promptCache entries for sessions no longer in the current resume list.
+      const currentIds = new Set(next.map(x => x.sessionId))
+      for (const key of this.promptCache.keys()) {
+        if (!currentIds.has(key)) {
+          this.promptCache.delete(key)
+        }
       }
-    })
 
-    // Prune promptCache entries for sessions no longer in the current resume list.
-    const currentIds = new Set(next.map(x => x.sessionId))
-    for (const key of this.promptCache.keys()) {
-      if (!currentIds.has(key)) {
-        this.promptCache.delete(key)
+      const sig = next.map(x => `${x.sessionId}:${x.lastEventTs}`).join('|')
+      if (sig === this.lastResumeDebugSig) {
+        return
       }
-    }
+      this.lastResumeDebugSig = sig
+      this.resumeOptions = next
 
-    const sig = next.map(x => `${x.sessionId}:${x.lastEventTs}`).join('|')
-    if (sig === this.lastResumeDebugSig) {
-      return
-    }
-    this.lastResumeDebugSig = sig
-    this.resumeOptions = next
+      if (this.selectedResumeSessionId && !next.find(x => x.sessionId === this.selectedResumeSessionId)) {
+        this.selectedResumeSessionId = ''
+      }
+      if (!this.selectedResumeSessionId && next.length) {
+        this.selectedResumeSessionId = next[0].sessionId
+      }
 
-    if (this.selectedResumeSessionId && !next.find(x => x.sessionId === this.selectedResumeSessionId)) {
-      this.selectedResumeSessionId = ''
-    }
-    if (!this.selectedResumeSessionId && next.length) {
-      this.selectedResumeSessionId = next[0].sessionId
-    }
+      this.debug.log('workspace.resume_options.update', {
+        workspace_id: this.workspace?.id,
+        workspace_cwd: this.workspace?.cwd,
+        project_dir: dir,
+        options_count: next.length,
+        selected_session_id: this.selectedResumeSessionId || null,
+      })
 
-    this.debug.log('workspace.resume_options.update', {
-      workspace_id: this.workspace?.id,
-      workspace_cwd: this.workspace?.cwd,
-      project_dir: dir,
-      options_count: next.length,
-      selected_session_id: this.selectedResumeSessionId || null,
-    })
-
-    if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+      this.scheduleCD()
+    } finally {
+      this.refreshingResumeOptions = false
+    }
   }
 
   onResumeSelectionChanged (id: string): void {
@@ -968,28 +1168,27 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     return age ? `${shortId} (${x.status}, ${age})` : `${shortId} (${x.status})`
   }
 
-  private readFirstPrompt (transcriptPath: string): string {
+  private async readFirstPrompt (transcriptPath: string): Promise<string> {
+    let fh: fsSync.promises.FileHandle | null = null
     try {
-      const fd = fsSync.openSync(transcriptPath, 'r')
-      try {
-        const buf = Buffer.alloc(16384)
-        const n = fsSync.readSync(fd, buf, 0, buf.length, 0)
-        const text = buf.toString('utf8', 0, n)
-        for (const line of text.split('\n')) {
-          const trimmed = line.trim()
-          if (!trimmed) continue
-          const obj = safeJsonParse<any>(trimmed)
-          if (!obj || obj.type !== 'user') continue
-          const c = obj.message?.content
-          if (typeof c === 'string') return c.trim()
-          if (Array.isArray(c)) {
-            return c.filter((b: any) => b.type === 'text').map((b: any) => b.text ?? '').join(' ').trim()
-          }
+      fh = await fsSync.promises.open(transcriptPath, 'r')
+      const buf = Buffer.alloc(16384)
+      const { bytesRead } = await fh.read(buf, 0, buf.length, 0)
+      const text = buf.toString('utf8', 0, bytesRead)
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        const obj = safeJsonParse<any>(trimmed)
+        if (!obj || obj.type !== 'user') continue
+        const c = obj.message?.content
+        if (typeof c === 'string') return c.trim()
+        if (Array.isArray(c)) {
+          return c.filter((b: any) => b.type === 'text').map((b: any) => b.text ?? '').join(' ').trim()
         }
-      } finally {
-        fsSync.closeSync(fd)
       }
-    } catch { }
+    } catch { } finally {
+      await fh?.close()
+    }
     return ''
   }
 
@@ -1015,7 +1214,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     }
 
     const cwd = this.workspace.cwd
-    if (cwd && !fsSync.existsSync(cwd)) {
+    let cwdExists = false
+    try { await fsSync.promises.stat(cwd); cwdExists = true } catch { }
+    if (cwd && !cwdExists) {
       this.notifications.error('Workspace cwd does not exist', cwd)
       this.logger.warn('resolveWorkspaceProfile: cwd does not exist', { workspaceId: this._workspaceId, cwd })
       this.debug.log('workspace.resolve_profile.failed', {
@@ -1059,7 +1260,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   }
 
   private async openWorkspaceTerminal (
-    launch?: { command?: string, args?: string[] },
+    launch?: { resolved?: { command?: string, args?: string[] }, sandboxName?: string, terminalId?: string } | null,
     titleHint?: string,
   ): Promise<void> {
     try {
@@ -1079,16 +1280,16 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         return
       }
       const { profile, cwd } = resolved
-      const terminalId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      // Docker containers get terminalId from buildLaunchCommand (already passed via -e).
+      // Native terminals generate it here.
+      const terminalId = launch?.terminalId || `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
       const baseEnv = { ...(profile?.options?.env ?? {}) }
-      const env = {
-        ...baseEnv,
-        FORCE_COLOR: '3',
-        CLAUDE_DOCK_SOURCE: 'tabby',
+      const env = cleanEnv(baseEnv, {
+        COLORTERM: 'truecolor',
         CLAUDE_DOCK_TABBY_SESSION: this.debug.sessionId,
         CLAUDE_DOCK_TERMINAL_ID: terminalId,
-      }
+      })
 
       const options: any = {
         ...(profile?.options ?? {}),
@@ -1097,9 +1298,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       }
 
       // Direct process launch: replace shell with Claude/Docker executable
-      if (launch?.command) {
-        options.command = launch.command
-        options.args = launch.args ?? []
+      if (launch?.resolved?.command) {
+        options.command = launch.resolved.command
+        options.args = launch.resolved.args ?? []
       }
 
       const profileWithCwd = {
@@ -1128,12 +1329,17 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
       const title = titleHint || `term-${++this.terminalSeq}`
 
-      this.terminals.push({
+      const entry: InternalTerminalSubTab = {
         id: terminalId,
         title,
         createdAt: Date.now(),
         tab,
-      })
+        sandboxName: launch?.sandboxName,
+      }
+      if (launch?.sandboxName) {
+        entry.virtualPid = this.runtimeSvc.trackContainer(launch.sandboxName)
+      }
+      this.terminals.push(entry)
       this.syncTerminalRegistry()
 
       this.activeTerminalId = terminalId
@@ -1143,7 +1349,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         if (t && newTitle) {
           t.title = newTitle
           this.events.updateTitleByTerminalId(terminalId, newTitle)
-          try { this.cdr.detectChanges() } catch { }
+          this.scheduleCD()
         }
       })
 
@@ -1151,6 +1357,10 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         const idx = this.terminals.findIndex(x => x.id === terminalId)
         if (idx < 0) return
         this.events.markEndedByTerminalId(terminalId, 'process_exited')
+        if (this.terminals[idx].sandboxName) {
+          this.runtimeSvc.untrackContainer(this.terminals[idx].sandboxName!)
+        }
+        this.cleanupSandbox(this.terminals[idx].sandboxName)
         const wasActive = this.activeTerminalId === terminalId
         this.terminals.splice(idx, 1)
         this.syncTerminalRegistry()
@@ -1205,7 +1415,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       workspace_id: this.workspaceId,
       cwd: this.workspace?.cwd ?? null,
     })
-    const launch = this.buildLaunchCommand([])
+    const launch = await this.buildLaunchCommand([])
+    if (!launch) return
     await this.openWorkspaceTerminal(launch, 'new')
   }
 
@@ -1214,7 +1425,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       workspace_id: this.workspaceId,
       cwd: this.workspace?.cwd ?? null,
     })
-    const launch = this.buildLaunchCommand(['--continue'])
+    const launch = await this.buildLaunchCommand(['--continue'])
+    if (!launch) return
     await this.openWorkspaceTerminal(launch, 'continue')
   }
 
@@ -1233,7 +1445,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       selected_session_id: sid,
       cwd: this.workspace?.cwd ?? null,
     })
-    const launch = this.buildLaunchCommand(['--resume', sid])
+    const launch = await this.buildLaunchCommand(['--resume', sid])
+    if (!launch) return
     await this.openWorkspaceTerminal(launch, `resume-${sid.slice(0, 8)}`)
   }
 
@@ -1248,10 +1461,14 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     try {
       for (const t of this.terminals) {
         this.events.markEndedByTerminalId(t.id, 'workspace_tab_closed')
+        if (t.sandboxName) this.runtimeSvc.untrackContainer(t.sandboxName)
+        this.cleanupSandbox(t.sandboxName)
         try { t.tab.removeFromContainer?.() } catch { }
         try { t.tab.destroy?.() } catch { }
       }
-    } catch { }
+    } catch (e: any) {
+      this.debug.log('workspace.destroy.cleanup_failed', { error: String(e?.message ?? e) })
+    }
     this.terminals = []
     this.syncTerminalRegistry()
     if (this.workspaceId) {
@@ -1285,6 +1502,12 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       delete store.claudeDock.savedTerminals[this.workspaceId]
     }
     this.cfg.save()
+
+    this.debug.log('workspace.save_terminals', {
+      workspace_id: this.workspaceId,
+      saved_count: saved.length,
+      sessions: saved.map(s => s.sessionId),
+    })
   }
 
   private restoreTerminalState (): void {
@@ -1304,12 +1527,17 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       sessions: saved.map(s => s.sessionId),
     })
 
-    // Resume each saved session
+    // Resume each saved session (async resolve, fire-and-forget per session)
     for (const s of saved) {
-      this.openWorkspaceTerminal(
-        this.shellWrap('claude', ['--resume', s.sessionId]),
-        s.title || `resume-${s.sessionId.slice(0, 8)}`,
-      )
+      const title = s.title || `resume-${s.sessionId.slice(0, 8)}`
+      this.buildLaunchCommand(['--resume', s.sessionId]).then(launch => {
+        if (launch) this.openWorkspaceTerminal(launch, title)
+      }).catch(e => {
+        this.debug.log('workspace.restore_terminals.failed', {
+          session_id: s.sessionId,
+          error: String(e?.message ?? e),
+        })
+      })
     }
   }
 
@@ -1319,5 +1547,19 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       return
     }
     this.terminalRegistry.setWorkspaceCount(id, this.terminals.length)
+  }
+
+  /** Remove Docker container asynchronously. Fire-and-forget. */
+  private cleanupSandbox (sandboxName?: string): void {
+    if (!sandboxName) return
+    this.debug.log('workspace.sandbox.cleanup', { sandbox_name: sandboxName })
+    childProcess.execFile('docker', ['rm', '-f', sandboxName], { timeout: 15000 }, (err) => {
+      if (err) {
+        this.debug.log('workspace.sandbox.cleanup_failed', {
+          sandbox_name: sandboxName,
+          error: String(err?.message ?? err),
+        })
+      }
+    })
   }
 }

@@ -85,23 +85,119 @@ Fix: `viewReady` flag set in `ngAfterViewInit`, guard all `detectChanges()` call
 Rule: any subscription set up in the constructor that may emit synchronously (BehaviorSubject,
 ReplaySubject, startWith) **must** guard detectChanges with a viewReady check.
 
-## Windows — node-pty cannot spawn .cmd files directly
+## Angular — change detection strategy
 
-`node-pty` on Windows throws `Error: File not found` when given a `.cmd` file (like `claude`)
-as the command. It only works with `.exe` binaries.
+Both components use `ChangeDetectionStrategy.OnPush` + `NgZone.runOutsideAngular()` +
+rAF-coalesced `scheduleCD()`. This prevents our async operations (file polling, runtime
+stats, config changes) from triggering Zone.js global change detection for ALL Tabby
+components.
 
-Fix: `shellWrap()` method wraps commands in `cmd.exe /c` on Windows.
+### Pattern
 
-Rule: always wrap non-exe commands through `cmd.exe /c` on `process.platform === 'win32'`.
+```typescript
+// 1. Component decorator
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, ... })
 
-## Docker — tilde expansion and volume mounts
+// 2. Inject NgZone
+private zone: NgZone
+this.zone = injector.get(NgZone)
+
+// 3. rAF-coalesced CD — max 1 render per animation frame
+private cdQueued = false
+private scheduleCD(): void {
+  if (this.cdQueued || !this.viewReady) return
+  this.cdQueued = true
+  requestAnimationFrame(() => {
+    this.cdQueued = false
+    if (!this.viewReady) return
+    try { this.cdr.detectChanges() } catch {}
+  })
+}
+
+// 4. Data subscriptions outside zone
+this.zone.runOutsideAngular(() => {
+  this.subscribeUntilDestroyed(obs$, (v) => {
+    this.field = v
+    this.scheduleCD()  // coalesced, not immediate
+  })
+})
+```
+
+### When to use direct `cdr.detectChanges()` vs `scheduleCD()`
+
+- **`scheduleCD()`** — data-only updates (stats, usage, sessions, todos, config). Safe to
+  defer by one animation frame (~16ms). Multiple updates in the same tick merge into one
+  render.
+- **Direct `cdr.detectChanges()`** — before DOM-dependent operations like terminal mounting
+  (`mountActiveTerminal`), or DOM hacks (select revert in `switchBranch`). These need the
+  DOM to be synchronously updated before the next line runs.
+
+### What stays inside Zone
+
+Template event handlers (`(click)`, `(keydown)`, `(change)`) run inside Zone automatically
+via Angular's event bindings. With OnPush, template events mark the component dirty and
+trigger CD — no manual call needed for user interactions.
+
+`focused$`, `blurred$`, `visibility$` subscriptions stay inside Zone in `workspaceTab`
+because they trigger DOM-dependent operations (terminal mount/detach, host show/hide).
+
+Rule: new subscriptions default to `runOutsideAngular` + `scheduleCD()`. Only run inside
+Zone if the callback does synchronous DOM manipulation that must complete before the next
+line.
+
+## Windows — cross-platform command resolution (src/launch.ts)
+
+`node-pty` on Windows uses `CreateProcessW` which cannot spawn `.cmd`/`.bat` files directly.
+The old `shellWrap()` wrapped ALL commands in `cmd.exe /c` - even native `.exe` binaries,
+adding an unnecessary process layer.
+
+Fix: `resolveForPty(name, args)` in `src/launch.ts` uses the `which` npm package (v4, CJS)
+to resolve the actual executable path via `PATH` + `PATHEXT`:
+- **.exe/.com** on Windows: spawn directly (no cmd.exe wrapper)
+- **.cmd/.bat** on Windows: wrap in `COMSPEC /d /s /c "full-path"` (safe flags)
+- **Not found**: fallback to COMSPEC (lets cmd.exe produce the error)
+- **Unix**: resolve full path via PATH (execvp handles shebangs natively)
+
+`cleanEnv(baseEnv, extras)` merges environment variables and strips nesting guards
+(`CLAUDECODE`) that would prevent Claude from starting if Tabby was launched from a
+Claude session.
+
+Rule: always use `resolveForPty()` for terminal launches, never spawn bare command names.
+Only async `which()` is allowed - `which.sync()` uses `fs.accessSync` (forbidden on renderer).
+Rule: always strip `CLAUDECODE` from terminal env via `cleanEnv()`.
+
+## Docker — container lifecycle
+
+Uses `docker run` (not `docker sandbox run`) with custom image `claude-dock-sandbox:dev`
+(built from `docker/Dockerfile`, based on `sandbox-templates:shell` + Claude CLI).
+
+**Why not `docker sandbox run`**: sandbox infra creates symlinks for `settings.json` and
+`.claude.json` pointing to `/mnt/claude-data/`. When `~/.claude` is bind-mounted, these
+symlinks are written THROUGH the bind mount onto the host filesystem, destroying the
+original files. `docker run` gives full control over mounts with no sandbox interference.
+
+Container launch (`buildLaunchCommand`):
+- Workspace mounted at its POSIX path: `-v C:\Users\NAME\project:/c/Users/NAME/project`
+- `CLAUDE_DOCK_CWD` env var for entrypoint symlink creation
+- `CLAUDE_DOCK_FORWARD_PORTS` env var for socat port forwarding
+- Optional `~/.claude` and `~/.claude.json` bind mounts (Mount ~/.claude checkbox)
+- `ANTHROPIC_API_KEY` forwarded if set
+
+Entrypoint (`docker/entrypoint.sh`):
+1. Creates Windows-path symlink (`/c/Users/NAME/.claude -> /home/agent/.claude`)
+2. Restores dangling symlinks from backups (safety net)
+3. Removes `.orphaned_at` plugin markers
+4. Starts socat port forwarders
+5. `exec "$@"` into claude
+
+On terminal close, `cleanupSandbox()` runs `docker rm -f <name>` asynchronously
+(fire-and-forget). Called from `closeTerminal`, `destroyed$`, and `destroy`.
 
 Docker does not expand `~` in `-v` volume paths. `~/.claude:/home/agent/.claude` fails with
 "bind source path does not exist: /.claude".
 
-Fix: use `path.join(os.homedir(), '.claude')` for the absolute path.
-
-Rule: always use absolute paths in Docker volume mounts, never `~`.
+Rule: always use `path.join(os.homedir(), '.claude')` for absolute paths in Docker volume
+mounts, never `~`.
 
 ## Tabby config — defaults required for persistence
 
@@ -236,20 +332,12 @@ This enables Chrome DevTools Protocol on port 9222. Tabby always exposes exactly
 Use `@electron/remote` via `evaluate_script` to resize the window for responsive testing:
 `require('@electron/remote').getCurrentWindow().setSize(width, height)`.
 
-**While a debug session is active**: after every `npm run build`, restart Tabby automatically
-so it picks up the new dist. Use the restart snippet below - do not wait for the user to
-restart manually.
+**After `npm run build`**: do NOT restart Tabby automatically. Print the restart command
+and let the user run it. The user manages the Tabby process lifecycle manually.
 
-To kill Tabby from Claude Code (Git Bash `taskkill //F` doesn't work — use PowerShell):
+Restart command (give to user, do not execute):
 ```bash
-powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"
-```
-
-To restart Tabby with debugging:
-```bash
-powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"
-sleep 2
-~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222 &
+powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"; sleep 2; ~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222 &
 ```
 
 ## Plugin system — orphaning and enabledPlugins

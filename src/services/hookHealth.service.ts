@@ -31,21 +31,29 @@ export class HookHealthService {
   })
 
   constructor () {
-    this.checkNow()
+    this.checkNow().catch(() => null)
   }
 
-  private findPluginDir (): string | null {
+  private async findPluginDir (): Promise<string | null> {
     const cacheDir = path.join(os.homedir(), '.claude', 'plugins', 'cache', PLUGIN_CACHE_BASE, PLUGIN_NAME)
     try {
-      const entries = fs.readdirSync(cacheDir).filter(e => {
-        try { return fs.statSync(path.join(cacheDir, e)).isDirectory() } catch { return false }
-      })
+      const allEntries = await fs.promises.readdir(cacheDir)
+      const entries: string[] = []
+      for (const e of allEntries) {
+        try {
+          const st = await fs.promises.stat(path.join(cacheDir, e))
+          if (st.isDirectory()) entries.push(e)
+        } catch { }
+      }
       if (!entries.length) return null
       // Pick latest version (reverse lexicographic sort)
       entries.sort().reverse()
       // Prefer entries without .orphaned_at marker
       for (const e of entries) {
-        if (!fs.existsSync(path.join(cacheDir, e, '.orphaned_at'))) {
+        try {
+          await fs.promises.stat(path.join(cacheDir, e, '.orphaned_at'))
+        } catch {
+          // No .orphaned_at marker - this is the one we want
           return path.join(cacheDir, e)
         }
       }
@@ -56,8 +64,8 @@ export class HookHealthService {
     }
   }
 
-  checkNow (): void {
-    const pluginDir = this.findPluginDir()
+  async checkNow (): Promise<void> {
+    const pluginDir = await this.findPluginDir()
     const hookPath = pluginDir ? path.join(pluginDir, 'claude-dock-hook.js') : ''
     const hooksJsonPath = pluginDir ? path.join(pluginDir, 'hooks', 'hooks.json') : ''
     const notes: string[] = []
@@ -66,8 +74,14 @@ export class HookHealthService {
       notes.push('Plugin not installed (run Install hooks from dashboard)')
     }
 
-    const hookExists = !!hookPath && fs.existsSync(hookPath)
-    const hooksJsonExists = !!hooksJsonPath && fs.existsSync(hooksJsonPath)
+    let hookExists = false
+    let hooksJsonExists = false
+    if (hookPath) {
+      try { await fs.promises.stat(hookPath); hookExists = true } catch { }
+    }
+    if (hooksJsonPath) {
+      try { await fs.promises.stat(hooksJsonPath); hooksJsonExists = true } catch { }
+    }
 
     if (pluginDir && !hookExists) {
       notes.push('Hook script missing from plugin')
@@ -79,7 +93,7 @@ export class HookHealthService {
     let missingEvents: string[] = []
     if (hooksJsonExists) {
       try {
-        const hooksConfig = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'))
+        const hooksConfig = JSON.parse(await fs.promises.readFile(hooksJsonPath, 'utf8'))
         const hooks = hooksConfig?.hooks ?? {}
         const expected = ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification', 'SessionEnd']
         missingEvents = expected.filter(e => {

@@ -202,7 +202,7 @@ function registerHooks () {
       settings.hooks[eventName].push({
         hooks: [{
           type: 'command',
-          command: `node "${hookScript}" --hook --event ${eventArg}`,
+          command: `node "${hookScript}" -- --hook --event ${eventArg}`,
           timeout: 10000,
         }],
       })

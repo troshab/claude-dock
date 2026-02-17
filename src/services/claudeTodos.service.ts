@@ -120,10 +120,10 @@ export class ClaudeTodosService {
     return out
   }
 
-  private extractTodosFromTranscriptTail (filePath: string): ClaudeTodo[] | null {
+  private async extractTodosFromTranscriptTail (filePath: string): Promise<ClaudeTodo[] | null> {
     let stat: fs.Stats
     try {
-      stat = fs.statSync(filePath)
+      stat = await fs.promises.stat(filePath)
     } catch {
       return null
     }
@@ -134,10 +134,11 @@ export class ClaudeTodosService {
     const maxBytes = 256 * 1024
     const start = Math.max(0, stat.size - maxBytes)
 
-    const fd = fs.openSync(filePath, 'r')
+    let fh: fs.promises.FileHandle | null = null
     try {
+      fh = await fs.promises.open(filePath, 'r')
       const buf = Buffer.alloc(stat.size - start)
-      fs.readSync(fd, buf, 0, buf.length, start)
+      await fh.read(buf, 0, buf.length, start)
       const text = buf.toString('utf8')
       const lines = text.split(/\r?\n/g)
       for (let i = lines.length - 1; i >= 0; i--) {
@@ -154,7 +155,7 @@ export class ClaudeTodosService {
       }
       return []
     } finally {
-      try { fs.closeSync(fd) } catch { }
+      await fh?.close()
     }
   }
 
@@ -165,7 +166,7 @@ export class ClaudeTodosService {
 
       let stat: fs.Stats
       try {
-        stat = fs.statSync(tx)
+        stat = await fs.promises.stat(tx)
       } catch {
         continue
       }
@@ -175,7 +176,7 @@ export class ClaudeTodosService {
         continue
       }
 
-      const todos = this.extractTodosFromTranscriptTail(tx)
+      const todos = await this.extractTodosFromTranscriptTail(tx)
       this.cache.set(tx, { mtimeMs: stat.mtimeMs, todos: todos ?? [] })
       changed = true
     }

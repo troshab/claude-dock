@@ -77,7 +77,7 @@ export class ClaudeEventsService {
   }
 
   private start (): void {
-    this.startRealtimeServer()
+    this.startRealtimeServer().catch(() => null)
     this.startTcpServer()
 
     const pollMs = 1000
@@ -92,15 +92,15 @@ export class ClaudeEventsService {
     this.tick().catch(() => null)
   }
 
-  private startRealtimeServer (): void {
+  private async startRealtimeServer (): Promise<void> {
     const endpoint = this.realtimeEndpoint
     try {
       if (endpoint.kind === 'unix') {
         const dir = path.dirname(endpoint.path)
-        fs.mkdirSync(dir, { recursive: true })
-        if (fs.existsSync(endpoint.path)) {
-          fs.unlinkSync(endpoint.path)
-        }
+        await fs.promises.mkdir(dir, { recursive: true })
+        try {
+          await fs.promises.unlink(endpoint.path)
+        } catch { }
       }
     } catch (e: any) {
       this.debug.log('events.realtime.prepare_failed', {
@@ -762,9 +762,13 @@ export class ClaudeEventsService {
               }, 100)
             }
           }
-        } catch { }
+        } catch (e: any) {
+          this.debug.log('events.notify.click_handler_error', { error: String(e?.message ?? e) })
+        }
       })
-    } catch { }
+    } catch (e: any) {
+      this.debug.log('events.notify.create_failed', { error: String(e?.message ?? e) })
+    }
 
     this.debug.log('events.notify.waiting', {
       title,

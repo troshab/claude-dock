@@ -1,5 +1,17 @@
 /* Minimal type shims so we can build without bundling Tabby/Angular deps. */
 
+declare module 'which' {
+  interface Options {
+    path?: string
+    pathExt?: string
+    all?: boolean
+    nothrow?: boolean
+  }
+  function which (cmd: string, options: Options & { nothrow: true }): Promise<string | null>
+  function which (cmd: string, options?: Options): Promise<string>
+  export = which
+}
+
 declare module '@angular/core' {
   export const Component: any
   export const NgModule: any
@@ -8,6 +20,16 @@ declare module '@angular/core' {
   export const ViewChild: any
   export const HostBinding: any
   export const HostListener: any
+
+  export enum ChangeDetectionStrategy {
+    OnPush = 0,
+    Default = 1,
+  }
+
+  export class NgZone {
+    runOutsideAngular<T>(fn: () => T): T
+    run<T>(fn: () => T): T
+  }
 
   export class Injector {
     get(token: any, notFoundValue?: any): any

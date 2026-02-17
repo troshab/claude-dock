@@ -12,6 +12,7 @@ export class ClaudeDockConfigProvider extends ConfigProvider {
       workspaces: [],
       savedTerminals: {},
       lastActiveWorkspaceId: null,
+      defaultDockerImage: 'ghcr.io/troshab/claude-dock:0.1.0',
       debugLogging: false,
     },
   }

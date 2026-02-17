@@ -28,8 +28,8 @@ export class ClaudeDockCommandProvider extends CommandProvider {
     this.hookHealth = injector.get(HookHealthService)
   }
 
-  private requireHooks (): boolean {
-    this.hookHealth.checkNow()
+  private async requireHooks (): Promise<boolean> {
+    await this.hookHealth.checkNow()
     if (this.hookHealth.status$.value.ok) {
       return true
     }
@@ -48,7 +48,7 @@ export class ClaudeDockCommandProvider extends CommandProvider {
   }
 
   private async openWorkspaceSelector (): Promise<void> {
-    if (!this.requireHooks()) return
+    if (!(await this.requireHooks())) return
     const ws = await this.workspaces.pickWorkspace()
     if (!ws) return
 
@@ -61,14 +61,14 @@ export class ClaudeDockCommandProvider extends CommandProvider {
   }
 
   private async createWorkspace (): Promise<void> {
-    if (!this.requireHooks()) return
+    if (!(await this.requireHooks())) return
     const ws = await this.workspaces.createInteractive()
     if (!ws) return
     this.app.openNewTabRaw({ type: WorkspaceTabComponent, inputs: { workspaceId: ws.id } })
   }
 
   private async openWorkspaceFolder (): Promise<void> {
-    if (!this.requireHooks()) return
+    if (!(await this.requireHooks())) return
     const ws = await this.workspaces.openFromFolderPicker()
     if (!ws) return
 
@@ -81,7 +81,7 @@ export class ClaudeDockCommandProvider extends CommandProvider {
   }
 
   private async openWorkspaceFromActiveTab (): Promise<void> {
-    if (!this.requireHooks()) return
+    if (!(await this.requireHooks())) return
     let tab: any = this.app.activeTab as any
     if (!tab) {
       this.notifications.error('No active tab')
@@ -189,7 +189,9 @@ export class ClaudeDockCommandProvider extends CommandProvider {
         const p = path.join(process.env.APPDATA ?? '', 'tabby', 'plugins')
         try {
           this.platform.openPath(p)
-        } catch { }
+        } catch (e: any) {
+          this.notifications.error('Could not open plugins directory', String(e?.message ?? e))
+        }
       },
     })
 

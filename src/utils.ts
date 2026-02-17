@@ -8,13 +8,22 @@ export function normalizePath (p: string): string {
   return (p ?? '').replace(/\\/g, '/')
 }
 
-/** Native-separator path for UI display. Windows → backslashes, others → forward slashes. */
+/** Human-friendly path for UI display. Always forward slashes, collapses home dir to ~. */
 export function displayPath (p: string): string {
   if (!p) return ''
-  if (process.platform === 'win32') {
-    return p.replace(/\//g, '\\')
-  }
-  return p.replace(/\\/g, '/')
+  let s = p.replace(/\\/g, '/')
+  // Normalise MSYS-style /c/Users/... → C:/Users/...
+  s = s.replace(/^\/([a-zA-Z])\//, (_, d) => `${d.toUpperCase()}:/`)
+  // Collapse home directory to ~
+  try {
+    const home = require('os').homedir().replace(/\\/g, '/')
+    if (s.startsWith(home + '/')) {
+      s = '~' + s.slice(home.length)
+    } else if (s === home) {
+      s = '~'
+    }
+  } catch {}
+  return s
 }
 
 export function pathBase (p: string): string {

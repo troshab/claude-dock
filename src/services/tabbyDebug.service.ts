@@ -33,28 +33,7 @@ export class TabbyDebugService {
     this.logPath = path.join(dir, `tabby-session-${this.sessionId}.log`)
 
     if (this.enabled) {
-      try {
-        fs.mkdirSync(path.dirname(this.logPath), { recursive: true })
-        this.stream = fs.createWriteStream(this.logPath, { flags: 'a', encoding: 'utf8' })
-        this.stream.on('error', () => {
-          if (!this.writeFailed) {
-            this.writeFailed = true
-            try { console.error('[claude-dock] failed writing debug log', this.logPath) } catch { }
-          }
-        })
-      } catch { }
-
-      this.log('tabby.session.start', {
-        session_id: this.sessionId,
-        log_path: this.logPath,
-        platform: process.platform,
-        arch: process.arch,
-        versions: process.versions,
-        cwd: process.cwd(),
-        argv: process.argv.slice(0, 8),
-        env: this.pickEnv(),
-      })
-
+      this.initStream().catch(() => null)
       this.attachGlobalErrorHandlers()
     }
 
@@ -69,6 +48,32 @@ export class TabbyDebugService {
     } catch (e: any) {
       this.log('tabby.session.close_hook_unavailable', { error: String(e?.message ?? e) })
     }
+  }
+
+  private async initStream (): Promise<void> {
+    try {
+      await fs.promises.mkdir(path.dirname(this.logPath), { recursive: true })
+      this.stream = fs.createWriteStream(this.logPath, { flags: 'a', encoding: 'utf8' })
+      this.stream.on('error', () => {
+        if (!this.writeFailed) {
+          this.writeFailed = true
+          try { console.error('[claude-dock] failed writing debug log', this.logPath) } catch { }
+        }
+      })
+    } catch (e: any) {
+      console.warn('[claude-dock] debug stream init failed:', e?.message ?? e)
+    }
+
+    this.log('tabby.session.start', {
+      session_id: this.sessionId,
+      log_path: this.logPath,
+      platform: process.platform,
+      arch: process.arch,
+      versions: process.versions,
+      cwd: process.cwd(),
+      argv: process.argv.slice(0, 8),
+      env: this.pickEnv(),
+    })
   }
 
   private attachGlobalErrorHandlers (): void {

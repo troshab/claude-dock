@@ -107,6 +107,7 @@ export interface SessionGroup {
   projectName: string
   sessions: ClaudeSession[]
   waitingCount: number
+  workingCount: number
   oldestWaitingTs?: number
   lastActivityTs?: number
 }

@@ -127,27 +127,62 @@ When you need to debug, enable it, reproduce the issue, then **always**:
 Never leave debug logging enabled after a session. Log files grow fast (~235 MB / 150 sessions)
 and have no rotation.
 
-## UI — semantic markup and accessibility conventions
+## UI — Tabby styling conventions
+
+Tabby is based on **Bootstrap 4**. Plugins must use BS4 classes, not BS5.
+
+- **Selects**: `select.form-control.form-control-sm`, NOT `form-select` (BS5).
+- **Buttons**: `btn btn-sm btn-outline-*` (standard BS4).
+- **Lists**: `list-group` / `list-group-item` / `list-group-item-action`.
+- **Settings tabs** in Tabby use `.form-line > .header > (.title + .description)` pattern.
+  Our dashboard/workspace tabs are standalone content tabs, not settings tabs, so they
+  use custom layout - but form controls must still be BS4-compatible.
+
+## UI — CSS class prefix
+
+All custom CSS classes use the `cd-` prefix (claude-dock). Previously was `cz-`
+(claude-code-zit). Never use unprefixed custom class names to avoid collisions with
+Tabby/Bootstrap globals.
+
+CSS custom properties also use `--cd-` prefix (e.g., `--cd-green`, `--cd-radius`).
+
+## UI — semantic markup and accessibility
 
 Both component templates (DashboardTab, WorkspaceTab) use semantic HTML and ARIA:
 
 - **Structure**: `<header>` for top bars, `<main>` for content areas, `<section>` for
   standalone screens (setup), `<h1>` for page title, `<h2>` for section titles.
 - **Lists**: workspace list and todo list use `<ul>/<li>` (with `list-style: none`).
-  Never nest `<button>` inside `<button>` — use `<li>` as the outer clickable element
-  with `cursor: pointer` and an inner `<button>` for the action.
+  Never nest `<button>` inside `<button>` — session rows use `<div role="button"
+  tabindex="0">` with `(keydown.enter)` and `(keydown.space)` handlers for keyboard
+  access. Inner action buttons (Close) use `$event.stopPropagation()` to avoid
+  triggering the row click.
 - **Usage bars**: `role="meter"` with `aria-label`, `[attr.aria-valuenow]`,
-  `aria-valuemin="0"`, `aria-valuemax="100"` on all `.cz-usage-bar` / `.cz-ws-usage-bar`
+  `aria-valuemin="0"`, `aria-valuemax="100"` on all `.cd-usage-bar` / `.cd-ws-usage-bar`
   elements.
-- **Tab bar**: `.cz-subtabs` has `role="tablist"` + `aria-label="Terminal tabs"`. Each
-  `.cz-subtab` has `role="tab"`, `[attr.aria-selected]`, `[attr.tabindex]` (0 for active,
+- **Tab bar**: `.cd-subtabs` has `role="tablist"` + `aria-label="Terminal tabs"`. Each
+  `.cd-subtab` has `role="tab"`, `[attr.aria-selected]`, `[attr.tabindex]` (0 for active,
   -1 for inactive). Arrow keys navigate between tabs (`onSubtabKeydown`). Terminal host
   has `role="tabpanel"`.
 - **Selects**: every `<select>` has an `aria-label` (e.g., "Sort workspaces", "Resume
   session", "Git branch").
-- **CSS tokens**: all colors, border-radius, and font-family values are defined as CSS
-  custom properties in `:host` (e.g., `--cz-green`, `--cz-radius`, `--cz-font-mono`).
-  Never use hardcoded hex/rgba values — always reference the token.
+- **Colors - BS4 first**: use Bootstrap 4 utility classes for element-level coloring:
+  `bg-success`, `bg-warning`, `bg-danger`, `bg-secondary`, `bg-dark`, `text-dark`,
+  `text-white`. Never create custom CSS tokens for colors that BS4 classes already cover.
+  Custom `--cd-*` color tokens exist ONLY for things BS4 cannot do: rgba overlays
+  (`--cd-green-subtle`, `--cd-green-border`, `--cd-green-hover`, `--cd-green-active`,
+  `--cd-overlay`), usage bar gradients (`--cd-green`, `--cd-yellow`, `--cd-red`),
+  checkbox accent-color (`--cd-green`, `--cd-orange`), and border colors (`--cd-border`,
+  `--cd-border-light`). WorkspaceTab-only: `--cd-option-bg`, `--cd-option-text`,
+  `--cd-terminal-bg`, `--cd-green-tab`.
+- **Spacing tokens**: never use raw pixel values for gap/margin/padding - use
+  `--cd-gap-micro` (2px), `--cd-gap-xs` (4px), `--cd-gap-xs-plus` (6px),
+  `--cd-gap-sm` (8px), `--cd-gap-md` (12px). Radii: `--cd-radius` (8px),
+  `--cd-radius-sm` (4px), `--cd-radius-pill` (999px). Excluded from tokenization:
+  `1px` borders, triangle geometry, fixed widths, font sizes, one-off structural padding.
+- **Todo indicators**: todo list uses colored dot indicators (`cd-todo-dot`) instead of
+  text markers. Pending: outlined circle (dim). In-progress: filled green circle.
+  Completed: outlined circle (very dim) + strikethrough text.
 - **Display name**: the plugin is titled "Claude Dock" in the UI.
 
 ## Debug screenshots
@@ -155,6 +190,36 @@ Both component templates (DashboardTab, WorkspaceTab) use semantic HTML and ARIA
 Save debug screenshots (layout issues, UI bugs, responsive testing) to `.screenshots/`.
 This directory is gitignored. Use descriptive filenames, e.g. `overlap-bug-dashboard.png`,
 `v5-narrow-450.png`. When taking screenshots via MCP `take_screenshot`, save them there.
+
+## Development — CSS workflow
+
+When testing style changes with an active DevTools debug session: **always prototype via
+`evaluate_script` first** (inject a `<style>` tag into `document.head`), take screenshots,
+and get user approval. Only then apply the changes to the source `.component.ts` file.
+Never modify source CSS before previewing in DevTools.
+
+## Development — mock data for layout testing
+
+Script: `node scripts/insert-mock-dashboard.js [sessions] [projects]`
+
+Connects to Tabby via CDP (port 9222), finds the DashboardTabComponent instance through
+Angular's `ɵgetLContext`, patches `visibleRuntimeSessions()` and `todosFor()` with
+generated sessions and mock todos, and calls `recompute()`. Zero external dependencies.
+Every 3rd session gets 2-5 random todos with mixed statuses (pending/in_progress/completed).
+
+```bash
+node scripts/insert-mock-dashboard.js            # 30 sessions, 5 projects
+node scripts/insert-mock-dashboard.js 100 10     # 100 sessions, 10 projects
+node scripts/insert-mock-dashboard.js clear       # remove mock data, restore live sessions
+```
+
+How it finds the component: `require('@angular/core').ɵgetLContext(dashboardElement)` returns
+the LView, component instance is at `lView[8]`. The patched `visibleRuntimeSessions` method
+overrides the default `events.sessions$.value` read - needed because the events service tick
+would overwrite `sessions$.next()` calls.
+
+To resize the Tabby window for testing: use `@electron/remote` via `evaluate_script`:
+`require('@electron/remote').getCurrentWindow().setSize(width, height)`.
 
 ## Development — Tabby remote debugging
 
@@ -170,6 +235,10 @@ This enables Chrome DevTools Protocol on port 9222. Tabby always exposes exactly
 `take_screenshot`, `evaluate_script`, `take_snapshot` to inspect DOM and debug layout.
 Use `@electron/remote` via `evaluate_script` to resize the window for responsive testing:
 `require('@electron/remote').getCurrentWindow().setSize(width, height)`.
+
+**While a debug session is active**: after every `npm run build`, restart Tabby automatically
+so it picks up the new dist. Use the restart snippet below - do not wait for the user to
+restart manually.
 
 To kill Tabby from Claude Code (Git Bash `taskkill //F` doesn't work — use PowerShell):
 ```bash

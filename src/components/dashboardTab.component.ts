@@ -19,56 +19,54 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
   selector: 'claude-dock-dashboard-tab',
   template: `
     <ng-container *ngIf="hooksEnabled(); else hooksSetup">
-      <header class="cz-header">
-        <div class="cz-title">
-          <h1 class="cz-title-main">Claude Dock</h1>
-          <button class="btn btn-sm btn-outline-primary cz-open-folder" (click)="openWorkspaceFolder()">
+      <header class="cd-header">
+        <div class="cd-title">
+          <h1 class="cd-title-main">Claude Dock</h1>
+          <button class="btn btn-sm btn-outline-primary cd-open-folder" (click)="openWorkspaceFolder()">
             Open workspace
           </button>
         </div>
 
-        <div class="cz-usage-head">
-          <div class="cz-usage-mini" aria-label="5-hour usage window">
-            <div class="cz-usage-mini-label">5H</div>
-            <div class="cz-usage-mid">
-              <div class="cz-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-usage-mask" [style.width.%]="usageHiddenPct(usage?.usage5h?.used)"></div>
-              </div>
-              <div class="cz-usage-reset" *ngIf="usageResetLabel(usage?.usage5h)">{{ usageResetLabel(usage?.usage5h) }}</div>
+        <div class="cd-usage-mini" aria-label="5-hour usage window">
+          <div class="cd-usage-mini-label">5H</div>
+          <div class="cd-usage-mid">
+            <div class="cd-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
+              <div class="cd-usage-mask" [style.width.%]="usageHiddenPct(usage?.usage5h?.used)"></div>
             </div>
-            <div class="cz-usage-mini-value">{{ usageLabel(usage?.usage5h) }}</div>
+            <div class="cd-usage-reset" *ngIf="usageResetLabel(usage?.usage5h)">{{ usageResetLabel(usage?.usage5h) }}</div>
           </div>
-          <div class="cz-usage-mini" aria-label="7-day usage window">
-            <div class="cz-usage-mini-label">7D</div>
-            <div class="cz-usage-mid">
-              <div class="cz-usage-bar" role="meter" aria-label="7-day usage" [attr.aria-valuenow]="usagePct(usage?.usageWeek?.used)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-usage-mask" [style.width.%]="usageHiddenPct(usage?.usageWeek?.used)"></div>
-              </div>
-              <div class="cz-usage-reset" *ngIf="usageResetLabel(usage?.usageWeek)">{{ usageResetLabel(usage?.usageWeek) }}</div>
+          <div class="cd-usage-mini-value">{{ usageLabel(usage?.usage5h) }}</div>
+        </div>
+        <div class="cd-usage-mini" aria-label="7-day usage window">
+          <div class="cd-usage-mini-label">7D</div>
+          <div class="cd-usage-mid">
+            <div class="cd-usage-bar" role="meter" aria-label="7-day usage" [attr.aria-valuenow]="usagePct(usage?.usageWeek?.used)" aria-valuemin="0" aria-valuemax="100">
+              <div class="cd-usage-mask" [style.width.%]="usageHiddenPct(usage?.usageWeek?.used)"></div>
             </div>
-            <div class="cz-usage-mini-value">{{ usageLabel(usage?.usageWeek) }}</div>
+            <div class="cd-usage-reset" *ngIf="usageResetLabel(usage?.usageWeek)">{{ usageResetLabel(usage?.usageWeek) }}</div>
           </div>
+          <div class="cd-usage-mini-value">{{ usageLabel(usage?.usageWeek) }}</div>
         </div>
 
-        <div class="cz-runtime-head" role="region" aria-label="System resources">
-          <span class="cz-runtime-name">CPU</span>
-          <span class="cz-runtime-value">{{ systemCpuLabel() }}</span>
-          <span class="cz-runtime-name cz-runtime-sep">RAM</span>
-          <span class="cz-runtime-value">{{ systemRamLabel() }}</span>
-          <span class="cz-runtime-sub">Claude</span>
-          <span class="cz-runtime-claude-val">{{ totalCpuLabel() }}</span>
-          <span class="cz-runtime-sub cz-runtime-sep">Claude</span>
-          <span class="cz-runtime-claude-val">{{ totalRamLabel() }}</span>
+        <div class="cd-runtime-head" role="region" aria-label="System resources">
+          <span class="cd-runtime-name">CPU</span>
+          <span class="cd-runtime-value">{{ systemCpuLabel() }}</span>
+          <span class="cd-runtime-name cd-runtime-sep">RAM</span>
+          <span class="cd-runtime-value">{{ systemRamLabel() }}</span>
+          <span class="cd-runtime-sub">Claude</span>
+          <span class="cd-runtime-claude-val">{{ totalCpuLabel() }}</span>
+          <span class="cd-runtime-sub cd-runtime-sep">Claude</span>
+          <span class="cd-runtime-claude-val">{{ totalRamLabel() }}</span>
         </div>
 
-        <div class="cz-controls">
-          <select class="form-select form-select-sm cz-select" aria-label="Sort workspaces" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
+        <div class="cd-controls">
+          <select class="form-control form-control-sm cd-select" aria-label="Sort workspaces" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
             <option value="none">Workspace: default</option>
             <option value="waiting">Workspace: waiting first</option>
             <option value="path">Workspace: by path</option>
           </select>
 
-          <select class="form-select form-select-sm cz-select" aria-label="Sort sessions" [value]="sortPreset" (change)="setSortPreset($any($event.target).value)">
+          <select class="form-control form-control-sm cd-select" aria-label="Sort sessions" [value]="sortPreset" (change)="setSortPreset($any($event.target).value)">
             <option value="status">Session: waiting first</option>
             <option value="startAsc">Session: oldest first</option>
             <option value="startDesc">Session: newest first</option>
@@ -78,71 +76,73 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
 
       </header>
 
-      <main class="cz-grid">
-        <div class="cz-col">
-          <h2 class="cz-section-title">Workspaces</h2>
+      <main class="cd-grid">
+        <div class="cd-col">
+          <h2 class="cd-section-title">Workspaces</h2>
 
-          <div *ngIf="!workspaces.length" class="cz-muted cz-empty">
+          <div *ngIf="!workspaces.length" class="cd-muted cd-empty">
             No recent workspaces yet.
           </div>
 
-          <ul class="list-group cz-list" *ngIf="workspaces.length">
+          <ul class="list-group cd-list" *ngIf="workspaces.length">
             <li
-              class="list-group-item list-group-item-action cz-row cz-ws-item"
+              class="list-group-item list-group-item-action cd-row cd-ws-item"
               *ngFor="let w of workspaces"
               (click)="openWorkspace(w.id)"
             >
-              <div class="cz-workspace-path" [title]="normalizeCwd(w.cwd)">{{ normalizeCwd(w.cwd) }}</div>
-              <button class="cz-ws-remove" title="Remove" aria-label="Remove workspace" (click)="removeWorkspace(w.id, $event)">&times;</button>
+              <div class="cd-workspace-path" [title]="normalizeCwd(w.cwd)">{{ normalizeCwd(w.cwd) }}</div>
+              <button class="cd-ws-remove" title="Remove" aria-label="Remove workspace" (click)="removeWorkspace(w.id, $event)">&times;</button>
             </li>
           </ul>
         </div>
 
-        <div class="cz-col">
-          <h2 class="cz-section-title">
+        <div class="cd-col">
+          <h2 class="cd-section-title">
             Sessions
-            <span class="cz-muted">({{ sessionsSorted.length }})</span>
+            <span class="cd-muted">({{ sessionsSorted.length }})</span>
           </h2>
 
-          <div *ngIf="!sessionsSorted.length" class="cz-muted cz-empty">
+          <div *ngIf="!sessionsSorted.length" class="cd-muted cd-empty">
             <div>No sessions yet.</div>
           </div>
 
-        <div>
-          <details class="cz-group" *ngFor="let g of groupsSorted; trackBy: trackGroupKey" [attr.open]="isGroupOpen(g) ? '' : null" (toggle)="setGroupOpen(g, $event)">
-            <summary class="cz-group-summary">
-              <span class="cz-strong">{{ g.projectName }}</span>
-              <span class="cz-muted cz-small">{{ normalizeCwd(g.cwd) }}</span>
-              <span class="cz-group-actions">
-                <span class="badge bg-success" *ngIf="g.waitingCount">{{ g.waitingCount }} waiting</span>
+        <div class="cd-groups-scroll">
+          <details class="cd-group" *ngFor="let g of groupsSorted; trackBy: trackGroupKey" [attr.open]="isGroupOpen(g) ? '' : null" (toggle)="setGroupOpen(g, $event)">
+            <summary class="cd-group-summary">
+              <span class="cd-group-chevron"></span>
+              <span class="cd-strong">{{ normalizeCwd(g.cwd) }}</span>
+              <span class="cd-group-actions">
+                <span class="badge cd-outline-warn" *ngIf="g.waitingCount">{{ g.waitingCount }} waiting</span>
+                <span class="badge cd-outline-ok" *ngIf="g.workingCount">{{ g.workingCount }} working</span>
                 <button
                   type="button"
-                  class="btn btn-sm btn-success cz-group-new"
+                  class="btn btn-sm btn-success cd-group-new"
                   title="New terminal in workspace"
                   (click)="newTerminalInGroup(g, $event)"
                 >
-                  +
+                  New
                 </button>
               </span>
             </summary>
 
-            <div class="list-group cz-list">
-              <button
-                type="button"
-                class="list-group-item list-group-item-action cz-row"
+            <div class="list-group cd-list">
+              <div
+                class="list-group-item list-group-item-action cd-row"
+                role="button" tabindex="0"
                 *ngFor="let s of g.sessions"
                 (click)="openWorkspaceForSession(s)"
+                (keydown.enter)="openWorkspaceForSession(s)"
+                (keydown.space)="openWorkspaceForSession(s); $event.preventDefault()"
               >
-                <div class="cz-row-top">
-                  <div class="cz-row-title">
-                    <span class="cz-strong">{{ sessionLabel(s, true) }}</span>
-                    <span class="cz-muted cz-small" *ngIf="s.sessionId"> {{ s.sessionId }}</span>
+                <div class="cd-row-top">
+                  <div class="cd-row-title">
+                    <span class="cd-strong">{{ sessionLabel(s, true) }}</span>
                   </div>
-                  <div class="cz-row-right">
+                  <div class="cd-row-right">
                     <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
                     <button
                       type="button"
-                      class="btn btn-sm btn-outline-danger cz-session-close"
+                      class="btn btn-sm btn-danger text-dark cd-session-close"
                       [disabled]="!canCloseSession(s)"
                       (click)="closeSession(s, $event)"
                     >
@@ -150,20 +150,24 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
                     </button>
                   </div>
                 </div>
-                <div class="cz-row-bottom">
-                  <span class="cz-muted cz-small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-                  <span class="cz-muted cz-small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-                  <span class="cz-muted cz-small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
-                  <span class="cz-muted cz-small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
-                </div>
 
-                <ul class="cz-todos" *ngIf="todosFor(s).length">
-                  <li class="cz-todo" *ngFor="let t of todosFor(s)">
-                    <span class="cz-todo-check" [class.done]="t.status === 'completed'">{{ todoMark(t.status) }}</span>
-                    <span class="cz-todo-text" [class.done]="t.status === 'completed'">{{ t.content }}</span>
+                <ul class="cd-todos" *ngIf="todosFor(s).length">
+                  <li class="cd-todo" *ngFor="let t of todosFor(s)">
+                    <span class="cd-todo-dot"
+                          [class.pending]="!t.status || t.status === 'pending'"
+                          [class.in-progress]="t.status === 'in_progress'"
+                          [class.completed]="t.status === 'completed'"></span>
+                    <span class="cd-todo-text" [class.done]="t.status === 'completed'">{{ t.content }}</span>
                   </li>
                 </ul>
-              </button>
+
+                <div class="cd-row-bottom">
+                  <span class="cd-muted cd-small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
+                  <span class="cd-muted cd-small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
+                  <span class="cd-muted cd-small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
+                  <span class="cd-muted cd-small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
+                </div>
+              </div>
             </div>
           </details>
         </div>
@@ -172,14 +176,14 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     </ng-container>
 
     <ng-template #hooksSetup>
-      <section class="cz-setup" aria-label="Setup">
-        <h1 class="cz-title-main">Claude Dock</h1>
-        <p class="cz-setup-text">
+      <section class="cd-setup" aria-label="Setup">
+        <h1 class="cd-title-main">Claude Dock</h1>
+        <p class="cd-setup-text">
           Install Claude hooks first to enable sessions and recent workspaces.
         </p>
         <button
           type="button"
-          class="btn btn-sm btn-outline-success cz-install-btn"
+          class="btn btn-sm btn-outline-success cd-install-btn"
           [disabled]="installRunning"
           (click)="runInstallHooks($event)"
           title="Install Claude hooks"
@@ -187,7 +191,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
           <i class="fas fa-download" aria-hidden="true"></i>
           <code>{{ installHooksCommand }}</code>
         </button>
-        <div class="cz-muted cz-small cz-install-hint" *ngIf="installOutput">
+        <div class="cd-muted cd-small cd-install-hint" *ngIf="installOutput">
           {{ installOutput }}
         </div>
       </section>
@@ -195,108 +199,99 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
   `,
   styles: [`
     :host {
-      display: flex; flex-direction: column; height: 100%; padding: 12px; overflow: auto;
-      --cz-gap-xs: 4px;
-      --cz-gap-sm: 8px;
-      --cz-gap-md: 12px;
-      --cz-bar-height: 8px;
-      --cz-click-min: 28px;
-      --cz-opacity-muted: 0.7;
-      --cz-opacity-dim: 0.6;
-      --cz-green: #2cc878;
-      --cz-yellow: #d7a92a;
-      --cz-red: #d35b5b;
-      --cz-orange: #e67e22;
-      --cz-green-subtle: rgba(44, 200, 120, .08);
-      --cz-green-border: rgba(44, 200, 120, .35);
-      --cz-green-hover: rgba(44, 200, 120, .24);
-      --cz-green-active: rgba(44, 200, 120, .33);
-      --cz-border: rgba(255, 255, 255, .08);
-      --cz-border-light: rgba(255, 255, 255, .12);
-      --cz-overlay: rgba(0, 0, 0, .55);
-      --cz-radius: 8px;
-      --cz-radius-pill: 999px;
-      --cz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      display: flex; flex-direction: column; height: 100%; padding: 12px; overflow: hidden;
+      --cd-gap-xs: 4px;
+      --cd-gap-sm: 8px;
+      --cd-gap-md: 12px;
+      --cd-bar-height: 8px;
+      --cd-click-min: 28px;
+      --cd-opacity-muted: 0.7;
+      --cd-opacity-dim: 0.6;
+      --cd-green: #3ba67a;
+      --cd-yellow: #d7a92a;
+      --cd-red: #d35b5b;
+      --cd-orange: #e67e22;
+      --cd-green-subtle: rgba(59, 166, 122, .08);
+      --cd-green-border: rgba(59, 166, 122, .35);
+      --cd-green-hover: rgba(59, 166, 122, .24);
+      --cd-green-active: rgba(59, 166, 122, .33);
+      --cd-border: rgba(255, 255, 255, .08);
+      --cd-border-light: rgba(255, 255, 255, .12);
+      --cd-overlay: rgba(0, 0, 0, .55);
+      --cd-radius: 8px;
+      --cd-radius-pill: 999px;
+      --cd-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --cd-gap-micro: 2px;
+      --cd-gap-xs-plus: 6px;
+      --cd-radius-sm: 4px;
     }
-    code { font-family: var(--cz-font-mono); }
+    code { font-family: var(--cd-font-mono); }
 
-    .cz-header { display: flex; gap: 8px; align-items: stretch; justify-content: flex-start; flex-wrap: wrap; margin-bottom: 12px; width: 100%; }
-    .cz-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; align-items: center; justify-content: center; gap: 4px; }
-    .cz-title-main { font-weight: 700; font-size: 1.15em; }
-    .cz-open-folder { white-space: nowrap; }
-    .cz-usage-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
-    .cz-usage-mini { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2px 4px; border: 1px solid var(--cz-border); border-radius: var(--cz-radius); padding: 4px 6px; }
-    .cz-usage-mini-label { font-weight: 700; text-transform: uppercase; opacity: .8; }
-    .cz-usage-mid { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-    .cz-usage-bar {
+    .cd-header { display: flex; gap: var(--cd-gap-sm); align-items: stretch; justify-content: flex-start; flex-wrap: wrap; margin-bottom: var(--cd-gap-md); width: 100%; }
+    .cd-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; align-items: center; justify-content: center; gap: var(--cd-gap-xs); }
+    .cd-title-main { font-weight: 700; font-size: 1.15em; }
+    .cd-open-folder { white-space: nowrap; }
+.cd-usage-mini { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--cd-gap-micro) var(--cd-gap-xs); border: 1px solid var(--cd-border); border-radius: var(--cd-radius); padding: var(--cd-gap-xs) var(--cd-gap-xs-plus); }
+    .cd-usage-mini-label { font-weight: 700; text-transform: uppercase; opacity: .8; }
+    .cd-usage-mid { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    .cd-usage-bar {
       position: relative;
-      height: var(--cz-bar-height);
-      border-radius: var(--cz-radius-pill);
+      height: var(--cd-bar-height);
+      border-radius: var(--cd-radius-pill);
       overflow: hidden;
-      background: linear-gradient(90deg, var(--cz-green) 0%, var(--cz-green) 60%, var(--cz-yellow) 80%, var(--cz-red) 100%);
+      background: linear-gradient(90deg, var(--cd-green) 0%, var(--cd-green) 60%, var(--cd-yellow) 80%, var(--cd-red) 100%);
     }
-    .cz-usage-mask {
+    .cd-usage-mask {
       position: absolute;
       top: 0;
       right: 0;
       bottom: 0;
       width: 100%;
-      background: var(--cz-overlay);
+      background: var(--cd-overlay);
       transition: width .2s ease;
     }
-    .cz-usage-mini-value { opacity: var(--cz-opacity-muted); text-align: right; white-space: nowrap; }
-    .cz-usage-reset { font-size: 0.8em; opacity: var(--cz-opacity-dim); white-space: nowrap; }
-    .cz-runtime-head {
+    .cd-usage-mini-value { opacity: var(--cd-opacity-muted); text-align: right; white-space: nowrap; }
+    .cd-usage-reset { font-size: 0.8em; opacity: var(--cd-opacity-dim); white-space: nowrap; }
+    .cd-runtime-head {
       display: grid;
       grid-template-columns: auto auto auto auto;
       align-content: center;
-      gap: 2px 6px;
-      padding: 4px 8px;
-      border: 1px solid var(--cz-green-border);
-      border-radius: var(--cz-radius);
+      gap: var(--cd-gap-micro) var(--cd-gap-xs-plus);
+      padding: var(--cd-gap-xs) var(--cd-gap-sm);
+      border: 1px solid var(--cd-green-border);
+      border-radius: var(--cd-radius);
       font-weight: 600;
-      background: var(--cz-green-subtle);
+      background: var(--cd-green-subtle);
       white-space: nowrap;
       flex-shrink: 1;
     }
-    .cz-runtime-name { opacity: .9; }
-    .cz-runtime-sub { opacity: var(--cz-opacity-dim); font-size: 0.85em; font-weight: 500; }
-    .cz-runtime-claude-val { opacity: var(--cz-opacity-muted); font-size: 0.85em; text-align: right; }
-    .cz-runtime-value { text-align: right; font-variant-numeric: tabular-nums; }
-    .cz-runtime-sep { padding-left: 8px; border-left: 1px solid var(--cz-border-light); }
-    .cz-controls { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; justify-content: center; margin-left: auto; }
-    .cz-select { width: auto; max-width: 100%; min-width: 0; }
+    .cd-runtime-name { opacity: .9; }
+    .cd-runtime-sub { opacity: var(--cd-opacity-dim); font-size: 0.85em; font-weight: 500; }
+    .cd-runtime-claude-val { opacity: var(--cd-opacity-muted); font-size: 0.85em; text-align: right; }
+    .cd-runtime-value { text-align: right; font-variant-numeric: tabular-nums; }
+    .cd-runtime-sep { padding-left: var(--cd-gap-sm); border-left: 1px solid var(--cd-border-light); }
+    .cd-controls { display: flex; flex-direction: column; gap: var(--cd-gap-xs); align-items: flex-start; justify-content: center; }
+    .cd-select { width: auto; max-width: 100%; min-width: 0; }
 
-    .cz-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: 12px; min-height: 0; width: 100%; }
-    @media (max-width: 700px) {
-      .cz-grid { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 500px) {
-      :host { padding: 8px; }
-      .cz-header { gap: 6px; }
-      .cz-runtime-head { display: none; }
-      .cz-usage-head { min-width: 0; }
-      .cz-group-summary { flex-wrap: wrap; }
-    }
-    @media (max-width: 400px) {
-      :host { padding: 6px; }
-      .cz-usage-mini-value { display: none; }
-      .cz-usage-reset { display: none; }
-    }
-    .cz-col { min-height: 0; }
+    .cd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: var(--cd-gap-md); flex: 1; min-height: 0; width: 100%; }
+    .cd-col { display: flex; flex-direction: column; min-height: 0; }
+    .cd-section-title { flex-shrink: 0; }
+    .cd-empty { flex-shrink: 0; }
 
-    h1.cz-title-main { font-size: 1.15em; margin: 0; }
-    h2.cz-section-title { font-size: 1em; margin: 0 0 8px 0; }
-    .cz-section-title { font-weight: 700; margin-bottom: 8px; }
+    h1.cd-title-main { font-size: 1.15em; margin: 0; }
+    h2.cd-section-title { font-size: 1em; margin: 0 0 var(--cd-gap-sm) 0; }
+    .cd-section-title { font-weight: 700; margin-bottom: var(--cd-gap-sm); }
+    .cd-groups-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: var(--cd-gap-sm); }
 
-    .cz-list { border-radius: var(--cz-radius); overflow: hidden; list-style: none; padding-left: 0; margin: 0; }
-    .cz-row { display: block; text-align: left; }
-    .cz-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-    .cz-row-title { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-    .cz-row-right { display: inline-flex; align-items: center; gap: 8px; }
-    .cz-session-close { padding: 3px 10px; line-height: 1.15; min-height: var(--cz-click-min); }
-    .cz-row-bottom { display: flex; gap: 12px; margin-top: 4px; flex-wrap: wrap; }
-    .cz-workspace-path {
+    .cd-list { border-radius: var(--cd-radius); overflow-y: auto; list-style: none; padding-left: 0; padding-right: var(--cd-gap-sm); margin: 0; flex: 1; min-height: 0; }
+    .cd-row { display: block; text-align: left; }
+    .cd-row[role="button"] { cursor: pointer; }
+    .cd-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cd-gap-md); }
+    .cd-row-title { display: flex; gap: var(--cd-gap-sm); align-items: baseline; flex-wrap: wrap; }
+    .cd-row-right { display: inline-flex; align-items: center; gap: var(--cd-gap-sm); }
+    .cd-session-close { padding: var(--cd-gap-micro) 10px; line-height: 1.4; border-radius: var(--cd-radius-sm); font-size: 0.8em; }
+    .cd-row-bottom { display: flex; gap: var(--cd-gap-md); margin-top: var(--cd-gap-xs); padding-top: var(--cd-gap-xs); border-top: 1px solid var(--cd-border); flex-wrap: wrap; }
+    .cd-workspace-path {
       width: 100%;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -307,27 +302,27 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       opacity: .85;
     }
 
-    .cz-badge-waiting { background: var(--cz-yellow); color: #000; font-weight: 600; }
-    .cz-badge-working { background: #2a8a52; color: #fff; font-weight: 600; }
-    .cz-ws-item { display: flex !important; align-items: center; gap: 8px; cursor: pointer; }
-    .cz-ws-remove {
+    .cd-outline-warn { border: 1px solid var(--cd-yellow); color: var(--cd-yellow); background: transparent; }
+    .cd-outline-ok { border: 1px solid var(--cd-green); color: var(--cd-green); background: transparent; }
+    .cd-ws-item { display: flex !important; align-items: center; gap: var(--cd-gap-sm); cursor: pointer; }
+    .cd-ws-remove {
       border: none;
       background: transparent;
       color: inherit;
       opacity: .5;
-      padding: 4px 8px;
+      padding: var(--cd-gap-xs) var(--cd-gap-sm);
       font-size: 16px;
       line-height: 1;
       cursor: pointer;
       flex-shrink: 0;
-      min-height: var(--cz-click-min);
+      min-height: var(--cd-click-min);
     }
-    .cz-ws-remove:hover { opacity: 1; color: var(--cz-red); }
-    .cz-strong { font-weight: 700; }
-    .cz-muted { opacity: .7; }
-    .cz-small { font-size: 0.85em; }
-    .cz-empty { padding: 8px 4px; }
-    .cz-setup {
+    .cd-ws-remove:hover { opacity: 1; color: var(--cd-red); }
+    .cd-strong { font-weight: 700; }
+    .cd-muted { opacity: .7; }
+    .cd-small { font-size: 0.85em; }
+    .cd-empty { padding: var(--cd-gap-sm) var(--cd-gap-xs); }
+    .cd-setup {
       height: 100%;
       width: 100%;
       display: flex;
@@ -337,37 +332,58 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       gap: 10px;
       padding: 18px;
     }
-    .cz-setup-text {
+    .cd-setup-text {
       opacity: .9;
     }
-    .cz-install-btn {
-      margin-top: 8px;
+    .cd-install-btn {
+      margin-top: var(--cd-gap-sm);
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--cd-gap-sm);
       font-size: 1.05em;
       font-weight: 700;
-      padding: 8px 12px;
+      padding: var(--cd-gap-sm) var(--cd-gap-md);
       border-width: 2px;
     }
-    .cz-install-btn code {
+    .cd-install-btn code {
       font-weight: 700;
     }
-    .cz-install-hint {
-      margin-top: 6px;
+    .cd-install-hint {
+      margin-top: var(--cd-gap-xs-plus);
     }
 
-    .cz-group { border: 1px solid var(--cz-border); border-radius: var(--cz-radius); padding: 8px; margin-bottom: 8px; }
-    .cz-group-summary { display: flex; gap: 8px; align-items: baseline; cursor: pointer; margin-bottom: 6px; }
-    .cz-group-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
-    .cz-group-new { width: var(--cz-click-min); height: var(--cz-click-min); padding: 0; line-height: 1; border-radius: var(--cz-radius-pill); }
+    .cd-group { border: 1px solid var(--cd-border); border-radius: var(--cd-radius); padding: var(--cd-gap-sm); margin-bottom: var(--cd-gap-sm); }
+    .cd-group summary { list-style: none; }
+    .cd-group summary::-webkit-details-marker { display: none; }
+    .cd-group-summary { display: flex; gap: var(--cd-gap-sm); align-items: center; cursor: pointer; margin-bottom: 0; padding: var(--cd-gap-xs) var(--cd-gap-xs-plus); }
+    .cd-group[open] > .cd-group-summary { margin-bottom: var(--cd-gap-xs-plus); }
+    .cd-group-chevron { display: inline-block; width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 7px; border-color: transparent transparent transparent currentColor; opacity: .6; transition: transform .15s ease; flex-shrink: 0; margin-left: var(--cd-gap-micro); margin-right: var(--cd-gap-micro); }
+    .cd-group[open] > .cd-group-summary > .cd-group-chevron { transform: rotate(90deg); }
+    .cd-group-actions { margin-left: auto; display: inline-flex; align-items: center; gap: var(--cd-gap-sm); }
+    .cd-group-new { padding: var(--cd-gap-micro) 10px; line-height: 1.4; border-radius: var(--cd-radius-sm); font-size: 0.8em; }
 
-    .cz-todos { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--cz-border); display: flex; flex-direction: column; gap: 2px; list-style: none; padding-left: 0; }
-    p.cz-setup-text { margin: 0; }
-    .cz-todo { display: flex; gap: 8px; align-items: baseline; }
-    .cz-todo-check { font-family: var(--cz-font-mono); opacity: .75; }
-    .cz-todo-check.done { opacity: var(--cz-opacity-dim); }
-    .cz-todo-text.done { text-decoration: line-through; opacity: var(--cz-opacity-dim); }
+    .cd-todos { margin: var(--cd-gap-xs) 0 0 0; padding-top: var(--cd-gap-sm); border-top: 1px solid var(--cd-border); display: flex; flex-direction: column; gap: var(--cd-gap-micro); list-style: none; padding-left: 0; }
+    p.cd-setup-text { margin: 0; }
+    .cd-todo { display: flex; gap: var(--cd-gap-sm); align-items: flex-start; }
+    .cd-todo-dot {
+      width: var(--cd-gap-sm);
+      height: var(--cd-gap-sm);
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: var(--cd-gap-xs);
+      border: 1.5px solid var(--cd-green);
+      background: transparent;
+      opacity: var(--cd-opacity-dim);
+    }
+    .cd-todo-dot.in-progress {
+      background: var(--cd-green);
+      border-color: var(--cd-green);
+      opacity: 1;
+    }
+    .cd-todo-dot.completed {
+      opacity: 0.35;
+    }
+    .cd-todo-text.done { text-decoration: line-through; opacity: var(--cd-opacity-dim); }
   `],
 })
 export class DashboardTabComponent extends BaseTabComponent {
@@ -557,7 +573,7 @@ export class DashboardTabComponent extends BaseTabComponent {
     return normalizePath(g.cwd || g.projectName || 'unknown')
   }
 
-  trackGroupKey (_: number, g: SessionGroup): string {
+  trackGroupKey = (_: number, g: SessionGroup): string => {
     return this.groupKey(g)
   }
 
@@ -595,10 +611,8 @@ export class DashboardTabComponent extends BaseTabComponent {
 
   badgeClass (status: string): string {
     switch (status) {
-      case 'waiting': return 'cz-badge-waiting'
-      case 'working': return 'cz-badge-working'
-      case 'unknown': return 'bg-secondary'
-      case 'ended': return 'bg-dark'
+      case 'waiting': return 'cd-outline-warn'
+      case 'working': return 'cd-outline-ok'
       default: return 'bg-secondary'
     }
   }
@@ -754,10 +768,14 @@ export class DashboardTabComponent extends BaseTabComponent {
           projectName: pathBase(cwd) || cwd || 'Unknown',
           sessions: [],
           waitingCount: 0,
+          workingCount: 0,
         })
       }
       const g = groups.get(key)!
       g.sessions.push(s)
+      if (s.status === 'working') {
+        g.workingCount += 1
+      }
       if (s.status === 'waiting') {
         g.waitingCount += 1
         if (s.waitingSinceTs) {

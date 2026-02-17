@@ -33,12 +33,12 @@ interface ResumeCandidate {
 @Component({
   selector: 'claude-dock-workspace-tab',
   template: `
-    <header class="cz-ws-header">
-      <div class="cz-ws-top-row">
-        <div class="cz-ws-actions">
+    <header class="cd-ws-header">
+      <div class="cd-ws-top-row">
+        <div class="cd-ws-actions">
           <button class="btn btn-sm btn-success" (click)="newClaude()">New</button>
           <button class="btn btn-sm btn-outline-primary" (click)="continueClaude()">Continue</button>
-          <select class="form-select form-select-sm cz-resume-select" aria-label="Resume session" [value]="selectedResumeSessionId" (change)="onResumeSelectionChanged($any($event.target).value)">
+          <select class="form-control form-control-sm cd-resume-select" aria-label="Resume session" [value]="selectedResumeSessionId" (change)="onResumeSelectionChanged($any($event.target).value)">
             <option value="">Select session…</option>
             <option *ngFor="let x of resumeOptions" [value]="x.sessionId">
               {{ resumeLabel(x) }}
@@ -47,63 +47,63 @@ interface ResumeCandidate {
           <button class="btn btn-sm btn-outline-secondary" [disabled]="!selectedResumeSessionId" (click)="resumeClaude()">Resume</button>
           <button class="btn btn-sm btn-outline-success" (click)="newTerminal()">New terminal</button>
         </div>
-        <div class="cz-ws-meters" *ngIf="systemStats || usage">
-          <div class="cz-ws-meters-row" *ngIf="systemStats">
-            <div class="cz-ws-usage-item" aria-label="System CPU load">
-              <span class="cz-ws-usage-label">CPU</span>
-              <div class="cz-ws-usage-bar" role="meter" aria-label="CPU load" [attr.aria-valuenow]="clamp(systemStats?.cpuLoadPercent)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.cpuLoadPercent)"></div>
+        <div class="cd-ws-meters" *ngIf="systemStats || usage">
+          <div class="cd-ws-meters-row" *ngIf="systemStats">
+            <div class="cd-ws-usage-item" aria-label="System CPU load">
+              <span class="cd-ws-usage-label">CPU</span>
+              <div class="cd-ws-usage-bar" role="meter" aria-label="CPU load" [attr.aria-valuenow]="clamp(systemStats?.cpuLoadPercent)" aria-valuemin="0" aria-valuemax="100">
+                <div class="cd-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.cpuLoadPercent)"></div>
               </div>
-              <span class="cz-ws-usage-val">{{ cpuLabel() }}</span>
+              <span class="cd-ws-usage-val">{{ cpuLabel() }}</span>
             </div>
-            <div class="cz-ws-usage-item" aria-label="System RAM usage">
-              <span class="cz-ws-usage-label">RAM</span>
-              <div class="cz-ws-usage-bar" role="meter" aria-label="RAM usage" [attr.aria-valuenow]="clamp(systemStats?.usedMemoryPercent)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.usedMemoryPercent)"></div>
+            <div class="cd-ws-usage-item" aria-label="System RAM usage">
+              <span class="cd-ws-usage-label">RAM</span>
+              <div class="cd-ws-usage-bar" role="meter" aria-label="RAM usage" [attr.aria-valuenow]="clamp(systemStats?.usedMemoryPercent)" aria-valuemin="0" aria-valuemax="100">
+                <div class="cd-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.usedMemoryPercent)"></div>
               </div>
-              <span class="cz-ws-usage-val">{{ ramLabel() }}</span>
+              <span class="cd-ws-usage-val">{{ ramLabel() }}</span>
             </div>
           </div>
-          <div class="cz-ws-meters-row" *ngIf="usage">
-            <div class="cz-ws-usage-item" aria-label="5-hour usage window">
-              <span class="cz-ws-usage-label">5h</span>
-              <div class="cz-ws-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usage5h?.used)"></div>
+          <div class="cd-ws-meters-row" *ngIf="usage">
+            <div class="cd-ws-usage-item" aria-label="5-hour usage window">
+              <span class="cd-ws-usage-label">5h</span>
+              <div class="cd-ws-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
+                <div class="cd-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usage5h?.used)"></div>
               </div>
-              <span class="cz-ws-usage-val">{{ usageLabel(usage?.usage5h) }}</span>
+              <span class="cd-ws-usage-val">{{ usageLabel(usage?.usage5h) }}</span>
             </div>
-            <div class="cz-ws-usage-item" aria-label="7-day usage window">
-              <span class="cz-ws-usage-label">7d</span>
-              <div class="cz-ws-usage-bar" role="meter" aria-label="7-day usage" [attr.aria-valuenow]="usagePct(usage?.usageWeek?.used)" aria-valuemin="0" aria-valuemax="100">
-                <div class="cz-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usageWeek?.used)"></div>
+            <div class="cd-ws-usage-item" aria-label="7-day usage window">
+              <span class="cd-ws-usage-label">7d</span>
+              <div class="cd-ws-usage-bar" role="meter" aria-label="7-day usage" [attr.aria-valuenow]="usagePct(usage?.usageWeek?.used)" aria-valuemin="0" aria-valuemax="100">
+                <div class="cd-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usageWeek?.used)"></div>
               </div>
-              <span class="cz-ws-usage-val">{{ usageLabel(usage?.usageWeek) }}</span>
+              <span class="cd-ws-usage-val">{{ usageLabel(usage?.usageWeek) }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="cz-ws-info-row" *ngIf="workspace?.cwd">
-        <span class="cz-ws-path">{{ normalizeCwd(workspace?.cwd || '') }}</span>
-        <span class="cz-ws-branch" *ngIf="currentBranch">
-          (Git Branch: <select class="cz-branch-select" aria-label="Git branch"
+      <div class="cd-ws-info-row" *ngIf="workspace?.cwd">
+        <span class="cd-ws-path">{{ normalizeCwd(workspace?.cwd || '') }}</span>
+        <span class="cd-ws-branch" *ngIf="currentBranch">
+          (Git Branch: <select class="form-control form-control-sm cd-branch-select" aria-label="Git branch"
             [value]="currentBranch"
             (change)="switchBranch($any($event.target).value)">
             <option *ngFor="let b of branches" [value]="b">{{ b }}</option>
           </select>)
         </span>
-        <span class="cz-ws-no-git" *ngIf="!currentBranch">(No Git Repo)</span>
-        <label class="cz-ws-chk" [ngClass]="sandboxChkColor">
+        <span class="cd-ws-no-git" *ngIf="!currentBranch">(No Git Repo)</span>
+        <label class="cd-ws-chk" [ngClass]="sandboxChkColor">
           <input type="checkbox" [checked]="useDockerSandbox"
             (change)="toggleDockerSandbox($any($event.target).checked)">
           <span>Docker sandbox</span>
         </label>
-        <label class="cz-ws-chk" [ngClass]="mountChkColor" [class.cz-ws-chk-disabled]="!useDockerSandbox">
+        <label class="cd-ws-chk" [ngClass]="mountChkColor" [class.cd-ws-chk-disabled]="!useDockerSandbox">
           <input type="checkbox" [checked]="mountClaudeDir" [disabled]="!useDockerSandbox"
             (change)="toggleMountClaude($any($event.target).checked)">
           <span>Mount ~/.claude</span>
         </label>
-        <label class="cz-ws-chk" [ngClass]="permsChkColor">
+        <label class="cd-ws-chk" [ngClass]="permsChkColor">
           <input type="checkbox" [checked]="skipPermissions"
             (change)="toggleSkipPermissions($any($event.target).checked)">
           <span>Dangerously skip permissions</span>
@@ -111,14 +111,14 @@ interface ResumeCandidate {
       </div>
     </header>
 
-    <div *ngIf="!workspace" class="cz-muted cz-empty">
+    <div *ngIf="!workspace" class="cd-muted cd-empty">
       Workspace not found.
     </div>
 
-    <main *ngIf="workspace" class="cz-ws-body">
-      <div class="cz-subtabs" role="tablist" aria-label="Terminal tabs" *ngIf="terminals.length" (keydown)="onSubtabKeydown($event)">
+    <main *ngIf="workspace" class="cd-ws-body">
+      <div class="cd-subtabs" role="tablist" aria-label="Terminal tabs" *ngIf="terminals.length" (keydown)="onSubtabKeydown($event)">
         <div
-          class="cz-subtab"
+          class="cd-subtab"
           role="tab"
           *ngFor="let t of terminals; trackBy: trackTerminalId"
           [class.active]="t.id === activeTerminalId"
@@ -126,19 +126,19 @@ interface ResumeCandidate {
           [attr.tabindex]="t.id === activeTerminalId ? 0 : -1"
           (click)="activateTerminal(t.id)"
         >
-          <div class="cz-subtab-info">
-            <div class="cz-subtab-title">{{ t.title }}</div>
-            <div class="cz-subtab-runtime" *ngIf="subtabRuntime(t.id)">{{ subtabRuntime(t.id) }}</div>
+          <div class="cd-subtab-info">
+            <div class="cd-subtab-title">{{ t.title }}</div>
+            <div class="cd-subtab-runtime" *ngIf="subtabRuntime(t.id)">{{ subtabRuntime(t.id) }}</div>
           </div>
-          <button class="cz-subtab-close" aria-label="Close terminal" (click)="closeTerminal(t.id); $event.stopPropagation()">×</button>
+          <button class="btn btn-sm cd-subtab-close" aria-label="Close terminal" (click)="closeTerminal(t.id); $event.stopPropagation()">×</button>
         </div>
       </div>
 
-      <div *ngIf="!terminals.length" class="cz-muted cz-empty">
+      <div *ngIf="!terminals.length" class="cd-muted cd-empty">
         No terminals yet.
       </div>
 
-      <div class="cz-terminal-host" role="tabpanel" [attr.aria-label]="activeTerminalTitle()" [class.cz-terminal-active]="terminals.length > 0" (click)="focusTerminal()" (keydown)="onTerminalHostKey($event)">
+      <div class="cd-terminal-host" role="tabpanel" [attr.aria-label]="activeTerminalTitle()" [class.cd-terminal-active]="terminals.length > 0" (click)="focusTerminal()" (keydown)="onTerminalHostKey($event)">
         <ng-container #terminalHost></ng-container>
       </div>
     </main>
@@ -146,140 +146,134 @@ interface ResumeCandidate {
   styles: [`
     :host {
       display: flex; flex-direction: column; width: 100%; height: 100%; padding: 0; overflow: hidden;
-      --cz-gap-xs: 4px;
-      --cz-gap-sm: 8px;
-      --cz-gap-md: 12px;
-      --cz-bar-height: 8px;
-      --cz-click-min: 28px;
-      --cz-opacity-muted: 0.7;
-      --cz-opacity-dim: 0.6;
-      --cz-green: #2cc878;
-      --cz-yellow: #d7a92a;
-      --cz-red: #d35b5b;
-      --cz-orange: #e67e22;
-      --cz-green-subtle: rgba(44, 200, 120, .08);
-      --cz-green-border: rgba(44, 200, 120, .35);
-      --cz-green-hover: rgba(44, 200, 120, .24);
-      --cz-green-active: rgba(44, 200, 120, .33);
-      --cz-border: rgba(255, 255, 255, .08);
-      --cz-border-light: rgba(255, 255, 255, .12);
-      --cz-overlay: rgba(0, 0, 0, .55);
-      --cz-radius: 8px;
-      --cz-radius-pill: 999px;
-      --cz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --cd-gap-xs: 4px;
+      --cd-gap-sm: 8px;
+      --cd-gap-md: 12px;
+      --cd-bar-height: 8px;
+      --cd-click-min: 28px;
+      --cd-opacity-muted: 0.7;
+      --cd-opacity-dim: 0.6;
+      --cd-green: #3ba67a;
+      --cd-yellow: #d7a92a;
+      --cd-red: #d35b5b;
+      --cd-orange: #e67e22;
+      --cd-green-subtle: rgba(59, 166, 122, .08);
+      --cd-green-border: rgba(59, 166, 122, .35);
+      --cd-green-hover: rgba(59, 166, 122, .24);
+      --cd-green-active: rgba(59, 166, 122, .33);
+      --cd-border: rgba(255, 255, 255, .08);
+      --cd-border-light: rgba(255, 255, 255, .12);
+      --cd-overlay: rgba(0, 0, 0, .55);
+      --cd-radius: 8px;
+      --cd-radius-pill: 999px;
+      --cd-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --cd-gap-micro: 2px;
+      --cd-gap-xs-plus: 6px;
+      --cd-radius-sm: 4px;
+      --cd-option-bg: #1e1e2e;
+      --cd-option-text: #d4d4d4;
+      --cd-terminal-bg: #000;
+      --cd-green-tab: rgba(59, 166, 122, .15);
     }
-    .cz-muted { opacity: .7; }
-    .cz-empty { padding: 8px 12px; }
+    .cd-muted { opacity: .7; }
+    .cd-empty { padding: var(--cd-gap-sm) var(--cd-gap-md); }
 
-    .cz-ws-header { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 10px 8px 10px; }
-    .cz-ws-top-row { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; }
-    .cz-ws-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; align-items: center; min-width: 0; }
-    .cz-resume-select { width: 420px; min-width: 180px; max-width: 100%; flex-shrink: 1; }
-    .cz-ws-info-row { display: flex; align-items: center; gap: 6px; font-weight: 700; flex-wrap: wrap; }
-    .cz-ws-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .cz-branch-select { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0 2px; }
-    .cz-branch-select option { background: #1e1e2e; color: #d4d4d4; }
-    .cz-ws-no-git { opacity: .5; font-weight: 400; font-style: italic; }
-    .cz-ws-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; opacity: .7; }
-    .cz-ws-chk input { margin: 0; cursor: pointer; }
-    .cz-ws-chk-disabled { opacity: .35; pointer-events: none; }
-    .cz-ws-chk-green  { opacity: 1; color: var(--cz-green); }  .cz-ws-chk-green  input { accent-color: var(--cz-green); }
-    .cz-ws-chk-yellow { opacity: 1; color: var(--cz-yellow); }  .cz-ws-chk-yellow input { accent-color: var(--cz-yellow); }
-    .cz-ws-chk-orange { opacity: 1; color: var(--cz-orange); }  .cz-ws-chk-orange input { accent-color: var(--cz-orange); }
-    .cz-ws-chk-red    { opacity: 1; color: var(--cz-red); }  .cz-ws-chk-red    input { accent-color: var(--cz-red); }
+    .cd-ws-header { display: flex; flex-direction: column; gap: var(--cd-gap-sm); margin: 0; padding: 10px 10px var(--cd-gap-sm) 10px; }
+    .cd-ws-top-row { display: flex; align-items: center; justify-content: flex-start; gap: var(--cd-gap-md); flex-wrap: wrap; }
+    .cd-ws-actions { display: flex; gap: var(--cd-gap-sm); flex-wrap: wrap; justify-content: flex-start; align-items: center; min-width: 0; }
+    .cd-resume-select { width: 420px; min-width: 180px; max-width: 100%; flex-shrink: 1; }
+    .cd-ws-info-row { display: flex; align-items: center; gap: var(--cd-gap-xs-plus); font-weight: 700; flex-wrap: wrap; }
+    .cd-ws-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cd-branch-select { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0 var(--cd-gap-micro); height: auto; line-height: inherit; border-radius: 0; display: inline; width: auto; }
+    .cd-branch-select option { background: var(--cd-option-bg); color: var(--cd-option-text); }
+    .cd-ws-no-git { opacity: .5; font-weight: 400; font-style: italic; }
+    .cd-ws-chk { display: inline-flex; align-items: center; gap: var(--cd-gap-xs); cursor: pointer; user-select: none; opacity: .7; }
+    .cd-ws-chk input { margin: 0; cursor: pointer; }
+    .cd-ws-chk-disabled { opacity: .35; pointer-events: none; }
+    .cd-ws-chk-green  { opacity: 1; color: var(--cd-green); }  .cd-ws-chk-green  input { accent-color: var(--cd-green); }
+    .cd-ws-chk-yellow { opacity: 1; color: var(--cd-yellow); }  .cd-ws-chk-yellow input { accent-color: var(--cd-yellow); }
+    .cd-ws-chk-orange { opacity: 1; color: var(--cd-orange); }  .cd-ws-chk-orange input { accent-color: var(--cd-orange); }
+    .cd-ws-chk-red    { opacity: 1; color: var(--cd-red); }  .cd-ws-chk-red    input { accent-color: var(--cd-red); }
 
-    .cz-ws-meters { display: flex; flex-direction: row; gap: 8px; flex-shrink: 0; }
-    .cz-ws-meters-row { display: flex; gap: 8px; align-items: center; }
-    .cz-ws-usage-item { display: grid; grid-template-columns: 4ch 60px auto; align-items: center; gap: 4px; white-space: nowrap; }
-    .cz-ws-usage-label { font-weight: 700; opacity: .7; text-transform: uppercase; }
-    .cz-ws-usage-bar {
+    .cd-ws-meters { display: flex; flex-direction: row; gap: var(--cd-gap-sm); flex-shrink: 0; }
+    .cd-ws-meters-row { display: flex; gap: var(--cd-gap-sm); align-items: center; }
+    .cd-ws-usage-item { display: grid; grid-template-columns: 4ch 60px auto; align-items: center; gap: var(--cd-gap-xs); white-space: nowrap; }
+    .cd-ws-usage-label { font-weight: 700; opacity: .7; text-transform: uppercase; }
+    .cd-ws-usage-bar {
       width: 60px;
-      height: var(--cz-bar-height);
-      border-radius: var(--cz-radius-pill);
+      height: var(--cd-bar-height);
+      border-radius: var(--cd-radius-pill);
       overflow: hidden;
-      background: linear-gradient(90deg, var(--cz-green) 0%, var(--cz-green) 60%, var(--cz-yellow) 80%, var(--cz-red) 100%);
+      background: linear-gradient(90deg, var(--cd-green) 0%, var(--cd-green) 60%, var(--cd-yellow) 80%, var(--cd-red) 100%);
       position: relative;
     }
-    .cz-ws-usage-fill {
+    .cd-ws-usage-fill {
       position: absolute;
       top: 0; right: 0; bottom: 0;
-      background: var(--cz-overlay);
+      background: var(--cd-overlay);
       transition: width .2s ease;
     }
-    .cz-ws-usage-val { opacity: var(--cz-opacity-muted); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+    .cd-ws-usage-val { opacity: var(--cd-opacity-muted); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 
-    .cz-ws-body { display: flex; flex-direction: column; min-height: 0; min-width: 0; width: 100%; flex: 1; }
+    .cd-ws-body { display: flex; flex-direction: column; min-height: 0; min-width: 0; width: 100%; flex: 1; }
 
-    .cz-subtabs {
+    .cd-subtabs {
       display: flex;
-      gap: 2px;
+      gap: var(--cd-gap-micro);
       align-items: stretch;
       flex-wrap: nowrap;
       margin: 0;
       padding: 0;
-      border-bottom: 1px solid var(--cz-border-light);
+      border-bottom: 1px solid var(--cd-border-light);
       overflow-x: auto;
       overflow-y: hidden;
     }
-    .cz-subtab {
+    .cd-subtab {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
+      gap: var(--cd-gap-sm);
+      padding: var(--cd-gap-xs-plus) var(--cd-gap-md);
       border-bottom: 2px solid transparent;
       background: transparent;
       cursor: pointer;
       user-select: none;
       max-width: 280px;
       margin-bottom: -1px;
-      opacity: var(--cz-opacity-dim);
+      opacity: var(--cd-opacity-dim);
       transition: opacity .15s;
     }
-    .cz-subtab { background: rgba(44, 200, 120, .15); }
-    .cz-subtab:hover { opacity: .85; background: var(--cz-green-hover); }
-    .cz-subtab.active {
+    .cd-subtab { background: var(--cd-green-tab); }
+    .cd-subtab:hover { opacity: .85; background: var(--cd-green-hover); }
+    .cd-subtab.active {
       opacity: 1;
-      background: var(--cz-green-active);
-      border-bottom-color: var(--cz-green);
+      background: var(--cd-green-active);
+      border-bottom-color: var(--cd-green);
     }
-    .cz-subtab-info { display: flex; flex-direction: column; min-width: 0; }
-    .cz-subtab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cz-subtab-close {
+    .cd-subtab-info { display: flex; flex-direction: column; min-width: 0; }
+    .cd-subtab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cd-subtab-close {
       border: none;
       background: transparent;
       color: inherit;
       opacity: .75;
-      padding: 4px 6px;
+      padding: var(--cd-gap-xs) var(--cd-gap-xs-plus);
       line-height: 1;
       font-size: 18px;
       cursor: pointer;
     }
-    .cz-subtab-close:hover { opacity: 1; }
-    .cz-subtab-runtime { font-size: 0.8em; opacity: var(--cz-opacity-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .cd-subtab-close:hover { opacity: 1; }
+    .cd-subtab-runtime { font-size: 0.8em; opacity: var(--cd-opacity-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-    .cz-terminal-host { position: relative; flex: 1; min-height: 0; min-width: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; padding: 0; margin: 0; }
-    .cz-terminal-host.cz-terminal-active { background: #000; }
-    :host ::ng-deep .cz-terminal-host > * { width: 100%; min-width: 0; flex: 1 1 auto; }
-    :host ::ng-deep .cz-terminal-host .content { padding: 0 !important; margin: 0 !important; }
-    :host ::ng-deep .cz-terminal-host .tab-content { padding: 0 !important; margin: 0 !important; }
-    :host ::ng-deep .cz-terminal-host terminal-toolbar { display: none !important; }
-    :host ::ng-deep .cz-terminal-host > :first-child { padding: 0 !important; margin: 0 !important; }
-    :host ::ng-deep .cz-terminal-host .xterm { padding: 6px 0 0 10px; }
+    .cd-terminal-host { position: relative; flex: 1; min-height: 0; min-width: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; padding: 0; margin: 0; }
+    .cd-terminal-host.cd-terminal-active { background: var(--cd-terminal-bg); }
+    :host ::ng-deep .cd-terminal-host > * { width: 100%; min-width: 0; flex: 1 1 auto; }
+    :host ::ng-deep .cd-terminal-host .content { padding: 0 !important; margin: 0 !important; }
+    :host ::ng-deep .cd-terminal-host .tab-content { padding: 0 !important; margin: 0 !important; }
+    :host ::ng-deep .cd-terminal-host terminal-toolbar { display: none !important; }
+    :host ::ng-deep .cd-terminal-host > :first-child { padding: 0 !important; margin: 0 !important; }
+    :host ::ng-deep .cd-terminal-host .xterm { padding: 6px 0 0 10px; }
 
-    @media (max-width: 600px) {
-      .cz-resume-select { width: 100%; min-width: 0; }
-      .cz-ws-meters { width: 100%; }
-      .cz-ws-meters-row { flex: 1; }
-    }
-    @media (max-width: 450px) {
-      .cz-ws-header { padding: 6px 8px 4px 8px; }
-      .cz-ws-actions { gap: 4px; }
-      .cz-ws-actions .btn { padding: 3px 8px; font-size: 0.85em; }
-      .cz-resume-select { width: 100%; }
-      .cz-ws-info-row { font-size: 0.85em; gap: 4px; }
-      .cz-ws-meters { flex-direction: column; gap: 2px; }
-    }
-  `],
+`],
 })
 export class WorkspaceTabComponent extends BaseTabComponent {
   private _workspaceId: string | null = null
@@ -540,21 +534,21 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   get sandboxChkColor (): string {
     if (!this.useDockerSandbox) return ''
-    if (!this.skipPermissions) return 'cz-ws-chk-green'
-    return 'cz-ws-chk-yellow'
+    if (!this.skipPermissions) return 'cd-ws-chk-green'
+    return 'cd-ws-chk-yellow'
   }
 
   get mountChkColor (): string {
     if (!this.mountClaudeDir) return ''
-    if (!this.skipPermissions) return 'cz-ws-chk-yellow'
-    return 'cz-ws-chk-orange'
+    if (!this.skipPermissions) return 'cd-ws-chk-yellow'
+    return 'cd-ws-chk-orange'
   }
 
   get permsChkColor (): string {
     if (!this.skipPermissions) return ''
-    if (!this.useDockerSandbox) return 'cz-ws-chk-red'
-    if (!this.mountClaudeDir) return 'cz-ws-chk-orange'
-    return 'cz-ws-chk-red'
+    if (!this.useDockerSandbox) return 'cd-ws-chk-red'
+    if (!this.mountClaudeDir) return 'cd-ws-chk-orange'
+    return 'cd-ws-chk-red'
   }
 
   // --- Git branch ---

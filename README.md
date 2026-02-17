@@ -18,20 +18,6 @@ This single command builds the plugin, deploys Claude Code hooks, and links into
 
 Restart Tabby to activate.
 
-## Dev workflow
-
-```bash
-git clone git@github.com:troshab/claude-dock.git
-cd claude-dock
-npm install
-```
-
-`npm install` runs build + deploy automatically. A **junction** is created:
-
-- `<tabby-plugins>/node_modules/tabby-claude-dock` -> source dir
-
-So you only rebuild (`npm run build`) and restart Tabby.
-
 ## What the install does
 
 - Copies `bin/claude-dock-hook.js` to `~/.claude/plugins/cache/claude-dock/`
@@ -41,7 +27,3 @@ So you only rebuild (`npm run build`) and restart Tabby.
 
 Events are appended to `~/.claude/claude-dock/events.jsonl`.
 
-## Notes
-
-- Requires `tabby-local` plugin (for local terminals).
-- Dashboard sort default: waiting first, oldest waiting on top; then working by most recent tool usage.

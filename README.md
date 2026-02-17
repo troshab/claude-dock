@@ -1,8 +1,8 @@
-# tabby-claude-code-zit
+# tabby-claude-dock
 
 Tabby plugin that adds:
 
-- Pinned **Claude Code Dashboard** tab (singleton).
+- Pinned **Claude Dock Dashboard** tab (singleton).
 - **Workspace** tabs (one per project directory).
 - Per-workspace **terminal sub-tabs** (opened with `cwd = workspace.cwd`).
 - Claude Code **sessions list** (working/waiting) driven by Claude hooks writing `events.jsonl`.
@@ -27,13 +27,13 @@ Tabby plugins dir (this machine):
 
 Dev workflow: `npm run install:tabby` creates a **junction**:
 
-- `...\tabby\plugins\node_modules\tabby-claude-code-zit` -> `C:\Users\tro\claude-code-zit`
+- `...\tabby\plugins\node_modules\tabby-claude-dock` -> `C:\Users\tro\claude-code-zit`
 
 So you only rebuild (`npm run build`) and restart Tabby.
 
 ## Install Claude hooks (Windows)
 
-This replaces old `claude-notify` hook commands inside `~/.claude/settings.json` with our file logger hook.
+This replaces old hook commands inside `~/.claude/settings.json` with our file logger hook.
 
 ```powershell
 cd C:\Users\tro\claude-code-zit
@@ -42,7 +42,7 @@ npm run install:claude-hooks
 
 What it does:
 
-- Copies `bin/claude-code-zit-hook.js` to `C:\Users\tro\.claude\hooks\claude-code-zit-hook.js`
+- Copies `bin/claude-dock-hook.js` to the plugin cache
 - Patches `C:\Users\tro\.claude\settings.json` (creates a timestamped `.bak-*` backup)
 - Adds hook commands for:
   - `SessionStart` -> `session_start`
@@ -54,10 +54,9 @@ What it does:
 
 Events are appended to:
 
-- `C:\Users\tro\.claude\claude-code-zit\events.jsonl`
+- `C:\Users\tro\.claude\claude-dock\events.jsonl`
 
 ## Notes
 
 - This plugin assumes `tabby-local` is enabled (to open local terminals).
 - Dashboard sort default: waiting first, oldest waiting on top; then working by most recent tool usage.
-

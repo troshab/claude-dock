@@ -15,8 +15,8 @@ export interface HookHealthStatus {
   notes: string[]
 }
 
-const PLUGIN_CACHE_BASE = 'claude-code-zit'
-const PLUGIN_NAME = 'zit'
+const PLUGIN_CACHE_BASE = 'claude-dock'
+const PLUGIN_NAME = 'dock'
 
 @Injectable({ providedIn: 'root' })
 export class HookHealthService {
@@ -58,7 +58,7 @@ export class HookHealthService {
 
   checkNow (): void {
     const pluginDir = this.findPluginDir()
-    const hookPath = pluginDir ? path.join(pluginDir, 'claude-code-zit-hook.js') : ''
+    const hookPath = pluginDir ? path.join(pluginDir, 'claude-dock-hook.js') : ''
     const hooksJsonPath = pluginDir ? path.join(pluginDir, 'hooks', 'hooks.json') : ''
     const notes: string[] = []
 
@@ -88,7 +88,7 @@ export class HookHealthService {
             const entryHooks = Array.isArray(entry?.hooks) ? entry.hooks : []
             return entryHooks.some((h: any) => {
               const cmd = String(h?.command ?? '')
-              return cmd.includes('claude-code-zit-hook.js')
+              return cmd.includes('claude-dock-hook.js')
             })
           })
         })

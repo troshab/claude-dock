@@ -1,12 +1,12 @@
 {
-  "description": "claude-code-zit event forwarding hooks",
+  "description": "claude-dock event forwarding hooks",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event session_start",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event session_start",
             "async": true
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event tool_start",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event tool_start",
             "async": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event tool_end",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event tool_end",
             "async": true
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event stop",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event stop",
             "async": true
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event notification",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event notification",
             "async": true
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-code-zit-hook.js\" --hook --event session_end",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" --hook --event session_end",
             "async": true
           }
         ]

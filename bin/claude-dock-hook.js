@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Claude Code hook: append minimal JSONL event to ~/.claude/claude-code-zit/events.jsonl */
+/* Claude Dock hook: append minimal JSONL event to ~/.claude/claude-dock/events.jsonl */
 
 const fs = require('fs')
 const os = require('os')
@@ -65,7 +65,7 @@ function sanitizeFilePart (s) {
 }
 
 function debugDir () {
-  return path.join(os.homedir(), '.claude', 'claude-code-zit', 'debug')
+  return path.join(os.homedir(), '.claude', 'claude-dock', 'debug')
 }
 
 function sessionDebugPath (sessionId, transcriptPath) {
@@ -86,9 +86,9 @@ function detectSource (payload) {
     return { source: explicitArg, reason: 'arg:--source' }
   }
 
-  const explicit = (process.env.CLAUDE_CODE_ZIT_SOURCE || '').trim().toLowerCase()
+  const explicit = (process.env.CLAUDE_DOCK_SOURCE || '').trim().toLowerCase()
   if (explicit) {
-    return { source: explicit, reason: 'env:CLAUDE_CODE_ZIT_SOURCE' }
+    return { source: explicit, reason: 'env:CLAUDE_DOCK_SOURCE' }
   }
 
   const payloadSource = pickString(payload, [
@@ -111,9 +111,9 @@ function detectSource (payload) {
 function collectEnvSnapshot () {
   const out = {}
   const interesting = [
-    'CLAUDE_CODE_ZIT_SOURCE',
-    'CLAUDE_CODE_ZIT_TABBY_SESSION',
-    'CLAUDE_CODE_ZIT_TERMINAL_ID',
+    'CLAUDE_DOCK_SOURCE',
+    'CLAUDE_DOCK_TABBY_SESSION',
+    'CLAUDE_DOCK_TERMINAL_ID',
     'TERM_PROGRAM',
     'TERM',
     'WT_SESSION',
@@ -202,10 +202,10 @@ function decodeHookInputBuffer (buf) {
 }
 
 function queueDir () {
-  return path.join(os.homedir(), '.claude', 'claude-code-zit', 'hook-queue')
+  return path.join(os.homedir(), '.claude', 'claude-dock', 'hook-queue')
 }
 
-const ZIT_TCP_PORT = 19542
+const DOCK_TCP_PORT = 19542
 
 function isInsideDocker () {
   try {
@@ -218,16 +218,16 @@ function transportEndpoint () {
     return {
       kind: 'tcp',
       host: 'host.docker.internal',
-      port: ZIT_TCP_PORT,
+      port: DOCK_TCP_PORT,
     }
   }
-  const baseDir = path.join(os.homedir(), '.claude', 'claude-code-zit')
+  const baseDir = path.join(os.homedir(), '.claude', 'claude-dock')
   if (process.platform === 'win32') {
     const homeKey = os.homedir().toLowerCase()
     const hash = crypto.createHash('sha1').update(homeKey).digest('hex').slice(0, 10)
     return {
       kind: 'pipe',
-      path: `\\\\.\\pipe\\claude-code-zit-${hash}-events-v1`,
+      path: `\\\\.\\pipe\\claude-dock-${hash}-events-v1`,
     }
   }
   return {
@@ -348,8 +348,8 @@ async function processPayload (event, input, inputBytes) {
 
   const sourceInfo = detectSource(data)
   const source = sourceInfo.source
-  const tabbySession = (process.env.CLAUDE_CODE_ZIT_TABBY_SESSION || '').trim() || undefined
-  const terminalId = (process.env.CLAUDE_CODE_ZIT_TERMINAL_ID || '').trim() || undefined
+  const tabbySession = (process.env.CLAUDE_DOCK_TABBY_SESSION || '').trim() || undefined
+  const terminalId = (process.env.CLAUDE_DOCK_TERMINAL_ID || '').trim() || undefined
   const hostPid = Number(process.ppid) || undefined
   const payloadSha1 = crypto.createHash('sha1').update(input, 'utf8').digest('hex')
   const payloadPreview = shortText(input, 600)
@@ -383,7 +383,7 @@ async function processPayload (event, input, inputBytes) {
   }))
 
   // Keep file size bounded.
-  const dir = path.join(os.homedir(), '.claude', 'claude-code-zit')
+  const dir = path.join(os.homedir(), '.claude', 'claude-dock')
   fs.mkdirSync(dir, { recursive: true })
   const filePath = path.join(dir, 'events.jsonl')
   rotateIfLarge(filePath, 25 * 1024 * 1024)
@@ -434,9 +434,9 @@ async function processPayload (event, input, inputBytes) {
 }
 
 async function runWorker () {
-  const event = argValue('--event') || process.env.CLAUDE_CODE_ZIT_EVENT || process.env.CLAUDE_CODE_ZIT_WORKER_EVENT || 'unknown'
-  const payloadFile = argValue('--payload-file') || process.env.CLAUDE_CODE_ZIT_WORKER_PAYLOAD_FILE || ''
-  const expectedBytes = Number(argValue('--input-bytes') || process.env.CLAUDE_CODE_ZIT_WORKER_INPUT_BYTES || 0) || 0
+  const event = argValue('--event') || process.env.CLAUDE_DOCK_EVENT || process.env.CLAUDE_DOCK_WORKER_EVENT || 'unknown'
+  const payloadFile = argValue('--payload-file') || process.env.CLAUDE_DOCK_WORKER_PAYLOAD_FILE || ''
+  const expectedBytes = Number(argValue('--input-bytes') || process.env.CLAUDE_DOCK_WORKER_INPUT_BYTES || 0) || 0
   if (!payloadFile) {
     writeRuntimeDebug('worker_missing_payload_file', { event })
     return 0
@@ -471,7 +471,7 @@ async function runWorker () {
 }
 
 async function runDispatcher () {
-  const event = argValue('--event') || process.env.CLAUDE_CODE_ZIT_EVENT || 'unknown'
+  const event = argValue('--event') || process.env.CLAUDE_DOCK_EVENT || 'unknown'
   let buf
   try {
     buf = fs.readFileSync(0)
@@ -517,9 +517,9 @@ async function runDispatcher () {
       windowsHide: true,
       env: {
         ...process.env,
-        CLAUDE_CODE_ZIT_WORKER_EVENT: event,
-        CLAUDE_CODE_ZIT_WORKER_PAYLOAD_FILE: payloadFile,
-        CLAUDE_CODE_ZIT_WORKER_INPUT_BYTES: String(inputBytes),
+        CLAUDE_DOCK_WORKER_EVENT: event,
+        CLAUDE_DOCK_WORKER_PAYLOAD_FILE: payloadFile,
+        CLAUDE_DOCK_WORKER_INPUT_BYTES: String(inputBytes),
       },
     })
     child.unref()

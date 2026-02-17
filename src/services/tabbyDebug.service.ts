@@ -1,5 +1,5 @@
 import { Injectable, Injector } from '@angular/core'
-import { HostWindowService } from 'tabby-core'
+import { ConfigService, HostWindowService } from 'tabby-core'
 
 import * as fs from 'fs'
 import * as os from 'os'
@@ -17,40 +17,46 @@ export class TabbyDebugService {
   readonly sessionId: string
   readonly logPath: string
 
+  private enabled: boolean
   private startedAt = Date.now()
   private seq = 0
   private writeFailed = false
   private stream: fs.WriteStream | null = null
 
   constructor (injector: Injector) {
+    const cfg = injector.get(ConfigService)
+    this.enabled = !!(process.env.CLAUDE_DOCK_DEBUG === '1' || (cfg as any).store?.claudeDock?.debugLogging)
+
     const stamp = sanitize(new Date().toISOString().replace(/[:.]/g, '-'))
     this.sessionId = `${stamp}-pid${process.pid}`
-    const dir = path.join(os.homedir(), '.claude', 'claude-code-zit', 'tabby-debug')
+    const dir = path.join(os.homedir(), '.claude', 'claude-dock', 'tabby-debug')
     this.logPath = path.join(dir, `tabby-session-${this.sessionId}.log`)
 
-    try {
-      fs.mkdirSync(path.dirname(this.logPath), { recursive: true })
-      this.stream = fs.createWriteStream(this.logPath, { flags: 'a', encoding: 'utf8' })
-      this.stream.on('error', () => {
-        if (!this.writeFailed) {
-          this.writeFailed = true
-          try { console.error('[claude-code-zit] failed writing debug log', this.logPath) } catch { }
-        }
+    if (this.enabled) {
+      try {
+        fs.mkdirSync(path.dirname(this.logPath), { recursive: true })
+        this.stream = fs.createWriteStream(this.logPath, { flags: 'a', encoding: 'utf8' })
+        this.stream.on('error', () => {
+          if (!this.writeFailed) {
+            this.writeFailed = true
+            try { console.error('[claude-dock] failed writing debug log', this.logPath) } catch { }
+          }
+        })
+      } catch { }
+
+      this.log('tabby.session.start', {
+        session_id: this.sessionId,
+        log_path: this.logPath,
+        platform: process.platform,
+        arch: process.arch,
+        versions: process.versions,
+        cwd: process.cwd(),
+        argv: process.argv.slice(0, 8),
+        env: this.pickEnv(),
       })
-    } catch { }
 
-    this.log('tabby.session.start', {
-      session_id: this.sessionId,
-      log_path: this.logPath,
-      platform: process.platform,
-      arch: process.arch,
-      versions: process.versions,
-      cwd: process.cwd(),
-      argv: process.argv.slice(0, 8),
-      env: this.pickEnv(),
-    })
-
-    this.attachGlobalErrorHandlers()
+      this.attachGlobalErrorHandlers()
+    }
 
     try {
       const hostWindow = injector.get(HostWindowService)
@@ -99,7 +105,7 @@ export class TabbyDebugService {
       'TERM',
       'SHELL',
       'COMSPEC',
-      'CLAUDE_CODE_ZIT_SOURCE',
+      'CLAUDE_DOCK_SOURCE',
       'TABBY_PLUGINS',
       'WT_SESSION',
     ]
@@ -111,6 +117,7 @@ export class TabbyDebugService {
   }
 
   log (event: string, data?: any): void {
+    if (!this.enabled) return
     const line = {
       ts_iso: new Date().toISOString(),
       ts_ms: Date.now(),

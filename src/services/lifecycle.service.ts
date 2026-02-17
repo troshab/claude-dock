@@ -3,7 +3,7 @@ import { HostWindowService } from 'tabby-core'
 import { TabbyDebugService } from './tabbyDebug.service'
 
 @Injectable({ providedIn: 'root' })
-export class ClaudeCodeZitLifecycleService {
+export class ClaudeDockLifecycleService {
   closing = false
   windowCloseDecision: boolean | null = null
   closeRequestSeq = 0

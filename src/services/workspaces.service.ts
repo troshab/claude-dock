@@ -27,8 +27,8 @@ export class WorkspacesService {
     if (!store) {
       return false
     }
-    store.claudeCodeZit ??= {}
-    store.claudeCodeZit.workspaces ??= []
+    store.claudeDock ??= {}
+    store.claudeDock.workspaces ??= []
     return true
   }
 
@@ -36,7 +36,7 @@ export class WorkspacesService {
     if (!this.ensureStoreShape()) {
       return []
     }
-    const ws = (this.config as any).store.claudeCodeZit.workspaces as Workspace[]
+    const ws = (this.config as any).store.claudeDock.workspaces as Workspace[]
     return [...ws].sort((a, b) => {
       const la = a.lastActiveTs ?? 0
       const lb = b.lastActiveTs ?? 0
@@ -92,7 +92,7 @@ export class WorkspacesService {
         sortOrder: 0,
       }
     }
-    const wsList = (this.config as any).store.claudeCodeZit.workspaces as Workspace[]
+    const wsList = (this.config as any).store.claudeDock.workspaces as Workspace[]
 
     const existing = this.findByCwd(data.cwd)
     if (existing) {
@@ -135,7 +135,7 @@ export class WorkspacesService {
     if (!this.ensureStoreShape()) {
       return
     }
-    const root = (this.config as any).store.claudeCodeZit
+    const root = (this.config as any).store.claudeDock
     const wsList = root.workspaces as Workspace[]
     root.workspaces = wsList.filter(w => w.id !== id)
     if (root.lastActiveWorkspaceId === id) {
@@ -148,7 +148,7 @@ export class WorkspacesService {
     if (!this.ensureStoreShape()) {
       return
     }
-    const root = (this.config as any).store.claudeCodeZit
+    const root = (this.config as any).store.claudeDock
     root.lastActiveWorkspaceId = id
     if (id) {
       const wsList = root.workspaces as Workspace[]
@@ -173,7 +173,7 @@ export class WorkspacesService {
 
   updateWorkspace (id: string, patch: Partial<Workspace>): void {
     if (!this.ensureStoreShape()) return
-    const wsList = (this.config as any).store.claudeCodeZit.workspaces as Workspace[]
+    const wsList = (this.config as any).store.claudeDock.workspaces as Workspace[]
     const ws = wsList.find(w => w.id === id)
     if (!ws) return
     Object.assign(ws, patch)

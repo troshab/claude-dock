@@ -4,14 +4,14 @@ import { CommonModule } from '@angular/common'
 import { Injectable } from '@angular/core'
 import TabbyCorePlugin, { AppService, BaseTabComponent, ConfigProvider, CommandProvider, ConfigService, HostWindowService, MenuItemOptions, PlatformService, TabContextMenuItemProvider, TabRecoveryProvider, TabsService } from 'tabby-core'
 
-import { ClaudeCodeZitConfigProvider } from './config'
-import { ClaudeCodeZitCommandProvider } from './commands'
-import { ClaudeCodeZitRecoveryProvider } from './recoveryProvider'
+import { ClaudeDockConfigProvider } from './config'
+import { ClaudeDockCommandProvider } from './commands'
+import { ClaudeDockRecoveryProvider } from './recoveryProvider'
 
 import { DashboardTabComponent } from './components/dashboardTab.component'
 import { WorkspaceTabComponent } from './components/workspaceTab.component'
 
-import { ClaudeCodeZitLifecycleService } from './services/lifecycle.service'
+import { ClaudeDockLifecycleService } from './services/lifecycle.service'
 import { TabbyDebugService } from './services/tabbyDebug.service'
 
 /** Shared variable: tracks which tab the context menu was opened for. */
@@ -33,17 +33,17 @@ class CzContextMenuSentinel extends TabContextMenuItemProvider {
     TabbyCorePlugin,
   ],
   providers: [
-    { provide: ConfigProvider, useClass: ClaudeCodeZitConfigProvider, multi: true },
-    { provide: CommandProvider, useClass: ClaudeCodeZitCommandProvider, multi: true },
+    { provide: ConfigProvider, useClass: ClaudeDockConfigProvider, multi: true },
+    { provide: CommandProvider, useClass: ClaudeDockCommandProvider, multi: true },
     { provide: TabContextMenuItemProvider, useClass: CzContextMenuSentinel, multi: true },
-    { provide: TabRecoveryProvider, useClass: ClaudeCodeZitRecoveryProvider, multi: true },
+    { provide: TabRecoveryProvider, useClass: ClaudeDockRecoveryProvider, multi: true },
   ],
   declarations: [
     DashboardTabComponent,
     WorkspaceTabComponent,
   ],
 })
-export default class ClaudeCodeZitModule {
+export default class ClaudeDockModule {
   private reordering = false
   private stylesInjected = false
 
@@ -53,12 +53,20 @@ export default class ClaudeCodeZitModule {
     private tabs: TabsService,
     platform: PlatformService,
     hostWindow: HostWindowService,
-    lifecycle: ClaudeCodeZitLifecycleService,
+    lifecycle: ClaudeDockLifecycleService,
     debug: TabbyDebugService,
   ) {
     // Ensure lifecycle service instantiated.
     void lifecycle
     void debug
+
+    // One-time config migration: claudeCodeZit -> claudeDock
+    const store = (this.config as any).store
+    if (store?.claudeCodeZit && !store?.claudeDock?.workspaces?.length) {
+      store.claudeDock = { ...store.claudeCodeZit }
+      delete store.claudeCodeZit
+      this.config.save()
+    }
 
     // Monkey-patch context menu: for our tabs, keep only "Close" from the management group.
     const proto = Object.getPrototypeOf(platform)
@@ -99,7 +107,7 @@ export default class ClaudeCodeZitModule {
   }
 
   private isDashboardPinned (): boolean {
-    const v = (this.config as any).store?.claudeCodeZit?.dashboardPinned
+    const v = (this.config as any).store?.claudeDock?.dashboardPinned
     return v !== false
   }
 
@@ -131,15 +139,13 @@ export default class ClaudeCodeZitModule {
 
   private ensureDashboard (): void {
     const existing = this.app.tabs.find(t => t instanceof DashboardTabComponent) as DashboardTabComponent | undefined
-    if (!existing) {
-      const prev = this.app.activeTab
-      const tab = this.tabs.create({ type: DashboardTabComponent })
-      this.app.addTabRaw(tab, 0)
-      if (prev) {
-        this.app.selectTab(prev)
-      }
+    if (existing) {
+      this.app.selectTab(existing)
       return
     }
+    const tab = this.tabs.create({ type: DashboardTabComponent })
+    this.app.addTabRaw(tab, 0)
+    this.app.selectTab(tab)
   }
 
   private ensureDashboardFirst (): void {
@@ -170,12 +176,12 @@ export default class ClaudeCodeZitModule {
     if (typeof document === 'undefined') {
       return
     }
-    if (document.getElementById('claude-code-zit-styles')) {
+    if (document.getElementById('claude-dock-styles')) {
       return
     }
 
     const style = document.createElement('style')
-    style.id = 'claude-code-zit-styles'
+    style.id = 'claude-dock-styles'
     style.textContent = `
       tab-header.ccz-dashboard-tabheader .buttons button:last-child {
         display: none !important;

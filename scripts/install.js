@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Single install script for claude-code-zit:
+ * Single install script for claude-dock:
  * 1. Deploy Claude Code plugin (hooks) to ~/.claude/plugins/cache/
  * 2. Link Tabby plugin into Tabby plugins dir
- * 3. Clean up legacy install artifacts
+ * 3. Register hooks in settings.json
+ * 4. Clean up legacy install artifacts (including old claude-code-zit paths)
  */
 
 const fs = require('fs')
@@ -20,7 +21,7 @@ function deployCCPlugin () {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
   const version = pkg.version || '0.1.0'
 
-  const cacheDir = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-code-zit', 'zit', version)
+  const cacheDir = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-dock', 'dock', version)
 
   fs.mkdirSync(path.join(cacheDir, '.claude-plugin'), { recursive: true })
   fs.mkdirSync(path.join(cacheDir, 'hooks'), { recursive: true })
@@ -34,8 +35,8 @@ function deployCCPlugin () {
     path.join(cacheDir, 'hooks', 'hooks.json'),
   )
   fs.copyFileSync(
-    path.join(ROOT, 'bin', 'claude-code-zit-hook.js'),
-    path.join(cacheDir, 'claude-code-zit-hook.js'),
+    path.join(ROOT, 'bin', 'claude-dock-hook.js'),
+    path.join(cacheDir, 'claude-dock-hook.js'),
   )
 
   // Remove orphan marker if present
@@ -58,29 +59,39 @@ function linkTabbyPlugin () {
   }
 
   const nodeModulesDir = path.join(appData, 'tabby', 'plugins', 'node_modules')
-  const dest = path.join(nodeModulesDir, 'tabby-claude-code-zit')
+  const dest = path.join(nodeModulesDir, 'tabby-claude-dock')
 
   fs.mkdirSync(nodeModulesDir, { recursive: true })
 
-  if (fs.existsSync(dest)) {
-    let stat
-    try { stat = fs.lstatSync(dest) } catch { stat = null }
-    if (stat?.isSymbolicLink?.() || (stat && isJunction(dest))) {
-      console.log(`Tabby plugin already linked: ${dest}`)
+  // Check via lstat (does NOT follow symlinks) to detect broken junctions
+  let lstat
+  try { lstat = fs.lstatSync(dest) } catch { lstat = null }
+
+  if (lstat) {
+    if (lstat.isSymbolicLink()) {
+      // Junction or symlink — check if it points to current ROOT
+      let target
+      try { target = fs.realpathSync(dest) } catch { target = null }
+      if (target === fs.realpathSync(ROOT)) {
+        console.log(`Tabby plugin already linked: ${dest}`)
+        return
+      }
+      // Broken or stale junction — remove it
+      fs.unlinkSync(dest)
+      console.log(`Removed stale junction: ${dest}`)
+    } else if (lstat.isDirectory()) {
+      // Existing dir — update in place
+      fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dest, 'package.json'))
+      const distDest = path.join(dest, 'dist')
+      if (fs.existsSync(distDest)) {
+        fs.rmSync(distDest, { recursive: true, force: true })
+      }
+      copyDirSync(path.join(ROOT, 'dist'), distDest)
+      copyDirSync(path.join(ROOT, 'bin'), path.join(dest, 'bin'))
+      copyDirSync(path.join(ROOT, 'plugin'), path.join(dest, 'plugin'))
+      console.log(`Tabby plugin updated: ${dest}`)
       return
     }
-    // Existing dir — update in place
-    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dest, 'package.json'))
-    const distDest = path.join(dest, 'dist')
-    if (fs.existsSync(distDest)) {
-      fs.rmSync(distDest, { recursive: true, force: true })
-    }
-    copyDirSync(path.join(ROOT, 'dist'), distDest)
-    // Also update bin/ and plugin/
-    copyDirSync(path.join(ROOT, 'bin'), path.join(dest, 'bin'))
-    copyDirSync(path.join(ROOT, 'plugin'), path.join(dest, 'plugin'))
-    console.log(`Tabby plugin updated: ${dest}`)
-    return
   }
 
   // Create junction (no admin required on Windows)
@@ -124,7 +135,7 @@ function copyDirSync (src, dest, exclude = []) {
 function registerHooks () {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
   const version = pkg.version || '0.1.0'
-  const hookScript = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-code-zit', 'zit', version, 'claude-code-zit-hook.js')
+  const hookScript = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-dock', 'dock', version, 'claude-dock-hook.js')
     .replace(/\\/g, '/')
 
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
@@ -134,9 +145,10 @@ function registerHooks () {
     const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')
     const settings = JSON.parse(raw)
 
-    // Remove broken enabledPlugins entry if present
-    if (settings.enabledPlugins && settings.enabledPlugins['troshab@claude-code-zit'] !== undefined) {
+    // Remove old enabledPlugins entries
+    if (settings.enabledPlugins) {
       delete settings.enabledPlugins['troshab@claude-code-zit']
+      delete settings.enabledPlugins['troshab@claude-dock']
     }
 
     if (!settings.hooks || typeof settings.hooks !== 'object') {
@@ -153,6 +165,27 @@ function registerHooks () {
     }
 
     let modified = false
+
+    // Remove old claude-code-zit hooks from settings.json
+    const events = Object.keys(hookEvents)
+    for (const eventName of events) {
+      const arr = settings.hooks[eventName]
+      if (!Array.isArray(arr)) continue
+      const filtered = arr.filter(matcherEntry => {
+        if (!Array.isArray(matcherEntry?.hooks)) return true
+        matcherEntry.hooks = matcherEntry.hooks.filter(h => {
+          const cmd = String(h?.command ?? '')
+          return !cmd.includes('claude-code-zit-hook')
+        })
+        return matcherEntry.hooks.length > 0
+      })
+      if (filtered.length !== arr.length) {
+        settings.hooks[eventName] = filtered
+        modified = true
+        console.log(`Removed old claude-code-zit hook from ${eventName}`)
+      }
+    }
+
     for (const [eventName, eventArg] of Object.entries(hookEvents)) {
       if (!Array.isArray(settings.hooks[eventName])) {
         settings.hooks[eventName] = []
@@ -161,7 +194,7 @@ function registerHooks () {
       // Check if our hook is already registered
       const alreadyRegistered = settings.hooks[eventName].some(entry =>
         Array.isArray(entry?.hooks) && entry.hooks.some(h =>
-          String(h?.command ?? '').includes('claude-code-zit-hook')
+          String(h?.command ?? '').includes('claude-dock-hook')
         )
       )
       if (alreadyRegistered) continue
@@ -195,11 +228,55 @@ function cleanupLegacy () {
   const legacyFiles = [
     path.join(CLAUDE_DIR, 'hooks', 'claude-code-zit-hook.js'),
     path.join(CLAUDE_DIR, 'hooks', 'claude-code-zit.cmd'),
+    path.join(CLAUDE_DIR, 'hooks', 'claude-dock-hook.js'),
+    path.join(CLAUDE_DIR, 'hooks', 'claude-dock.cmd'),
   ]
   for (const f of legacyFiles) {
     if (fs.existsSync(f)) {
       fs.unlinkSync(f)
       console.log(`Removed legacy: ${f}`)
+    }
+  }
+
+  // Remove old plugin cache dir
+  const oldPluginCache = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-code-zit')
+  if (fs.existsSync(oldPluginCache)) {
+    try {
+      fs.rmSync(oldPluginCache, { recursive: true, force: true })
+      console.log(`Removed old plugin cache: ${oldPluginCache}`)
+    } catch (e) {
+      console.log(`Warning: could not remove old plugin cache: ${e.message}`)
+    }
+  }
+
+  // Remove old Tabby symlink
+  const appData = process.env.APPDATA
+  if (appData) {
+    const oldTabbyLink = path.join(appData, 'tabby', 'plugins', 'node_modules', 'tabby-claude-code-zit')
+    if (fs.existsSync(oldTabbyLink)) {
+      try {
+        const stat = fs.lstatSync(oldTabbyLink)
+        if (stat.isSymbolicLink()) {
+          fs.unlinkSync(oldTabbyLink)
+        } else {
+          fs.rmSync(oldTabbyLink, { recursive: true, force: true })
+        }
+        console.log(`Removed old Tabby plugin: ${oldTabbyLink}`)
+      } catch (e) {
+        console.log(`Warning: could not remove old Tabby plugin: ${e.message}`)
+      }
+    }
+  }
+
+  // Migrate data dir: ~/.claude/claude-code-zit/ -> ~/.claude/claude-dock/
+  const oldDataDir = path.join(CLAUDE_DIR, 'claude-code-zit')
+  const newDataDir = path.join(CLAUDE_DIR, 'claude-dock')
+  if (fs.existsSync(oldDataDir) && !fs.existsSync(newDataDir)) {
+    try {
+      fs.renameSync(oldDataDir, newDataDir)
+      console.log(`Migrated data dir: ${oldDataDir} -> ${newDataDir}`)
+    } catch (e) {
+      console.log(`Warning: could not migrate data dir: ${e.message}`)
     }
   }
 }
@@ -209,8 +286,8 @@ function cleanupLegacy () {
 try {
   deployCCPlugin()
   registerHooks()
-  linkTabbyPlugin()
   cleanupLegacy()
+  linkTabbyPlugin()
   console.log('\nDone. Restart Claude Code + Tabby to activate.')
 } catch (e) {
   console.error(`Install failed: ${e.message}`)

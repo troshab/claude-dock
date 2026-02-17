@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Uninstall claude-code-zit:
+ * Uninstall claude-dock:
  * 1. Remove Claude Code plugin from cache
  * 2. Remove Tabby plugin link/copy
  * 3. Clean up legacy artifacts from settings.json
@@ -14,10 +14,13 @@ const HOME = os.homedir()
 const CLAUDE_DIR = path.join(HOME, '.claude')
 
 function removeCCPlugin () {
-  const pluginBase = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-code-zit')
-  if (fs.existsSync(pluginBase)) {
-    fs.rmSync(pluginBase, { recursive: true, force: true })
-    console.log(`Removed Claude Code plugin: ${pluginBase}`)
+  // Remove both old and new plugin cache dirs
+  for (const name of ['claude-dock', 'claude-code-zit']) {
+    const pluginBase = path.join(CLAUDE_DIR, 'plugins', 'cache', name)
+    if (fs.existsSync(pluginBase)) {
+      fs.rmSync(pluginBase, { recursive: true, force: true })
+      console.log(`Removed Claude Code plugin: ${pluginBase}`)
+    }
   }
 }
 
@@ -25,24 +28,29 @@ function unlinkTabbyPlugin () {
   const appData = process.env.APPDATA
   if (!appData) return
 
-  const dest = path.join(appData, 'tabby', 'plugins', 'node_modules', 'tabby-claude-code-zit')
-  if (!fs.existsSync(dest)) return
+  // Remove both old and new Tabby plugin dirs
+  for (const name of ['tabby-claude-dock', 'tabby-claude-code-zit']) {
+    const dest = path.join(appData, 'tabby', 'plugins', 'node_modules', name)
+    if (!fs.existsSync(dest)) continue
 
-  try {
-    const stat = fs.lstatSync(dest)
-    if (stat.isSymbolicLink()) {
-      fs.unlinkSync(dest)
-    } else {
-      fs.rmSync(dest, { recursive: true, force: true })
+    try {
+      const stat = fs.lstatSync(dest)
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(dest)
+      } else {
+        fs.rmSync(dest, { recursive: true, force: true })
+      }
+      console.log(`Removed Tabby plugin: ${dest}`)
+    } catch (e) {
+      console.log(`Warning: could not remove Tabby plugin: ${e.message}`)
     }
-    console.log(`Removed Tabby plugin: ${dest}`)
-  } catch (e) {
-    console.log(`Warning: could not remove Tabby plugin: ${e.message}`)
   }
 }
 
 function cleanupLegacy () {
   const legacyFiles = [
+    path.join(CLAUDE_DIR, 'hooks', 'claude-dock-hook.js'),
+    path.join(CLAUDE_DIR, 'hooks', 'claude-dock.cmd'),
     path.join(CLAUDE_DIR, 'hooks', 'claude-code-zit-hook.js'),
     path.join(CLAUDE_DIR, 'hooks', 'claude-code-zit.cmd'),
   ]
@@ -53,7 +61,7 @@ function cleanupLegacy () {
     }
   }
 
-  // Remove claude-code-zit entries from settings.json
+  // Remove claude-dock and claude-code-zit entries from settings.json
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
   if (!fs.existsSync(settingsPath)) return
 
@@ -73,7 +81,7 @@ function cleanupLegacy () {
         if (!Array.isArray(matcherEntry?.hooks)) return true
         matcherEntry.hooks = matcherEntry.hooks.filter(h => {
           const cmd = String(h?.command ?? '')
-          return !cmd.includes('claude-code-zit')
+          return !cmd.includes('claude-dock') && !cmd.includes('claude-code-zit')
         })
         return matcherEntry.hooks.length > 0
       })
@@ -99,7 +107,7 @@ try {
   removeCCPlugin()
   unlinkTabbyPlugin()
   cleanupLegacy()
-  console.log('\nDone. claude-code-zit uninstalled.')
+  console.log('\nDone. claude-dock uninstalled.')
 } catch (e) {
   console.error(`Uninstall failed: ${e.message}`)
   process.exit(1)

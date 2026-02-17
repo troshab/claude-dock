@@ -1,18 +1,18 @@
 import { Injectable, Injector } from '@angular/core'
 
 import { ClaudeEventsService } from './claudeEvents.service'
-import { ClaudeCodeZitLifecycleService } from './lifecycle.service'
+import { ClaudeDockLifecycleService } from './lifecycle.service'
 import { TabbyDebugService } from './tabbyDebug.service'
 
 @Injectable({ providedIn: 'root' })
 export class ClaudeCloseGuardService {
   private events: ClaudeEventsService
-  private lifecycle: ClaudeCodeZitLifecycleService
+  private lifecycle: ClaudeDockLifecycleService
   private debug: TabbyDebugService
 
   constructor (injector: Injector) {
     this.events = injector.get(ClaudeEventsService)
-    this.lifecycle = injector.get(ClaudeCodeZitLifecycleService)
+    this.lifecycle = injector.get(ClaudeDockLifecycleService)
     this.debug = injector.get(TabbyDebugService)
   }
 

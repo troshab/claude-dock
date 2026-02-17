@@ -14,18 +14,34 @@ focus shifts. The workspace component must manage this itself.
 ## Known issues — terminal overlay on tab switch
 
 When switching from a workspace tab back to the dashboard, the workspace's embedded terminal
-can remain visible, covering the dashboard content.
+(and sometimes the entire workspace header/subtab bar) can remain visible, covering the
+dashboard content.
 
-Root cause: terminal detach was only in `blurred$`, but `blurred$` may not fire when focus
-is on a header element (checkbox, button, `<select>`, subtab bar) — Tabby only emits
-`visibility$(false)` in those cases. Any new interactive element added to the workspace
-header is a potential trigger.
+### Layer 1: terminal detach
+
+Root cause: `blurred$` may not fire when focus is on a header element (checkbox, button,
+`<select>`, subtab bar) — Tabby only emits `visibility$(false)` in those cases.
 
 Fix: `visibility$(false)` handler now also detaches the terminal (mirrors `blurred$`).
 Both `blurred$` and `visibility$(false)` detach; `focused$` + `visibility$(true)` remount.
 
-If the issue recurs: check that BOTH handlers detach, and that no new code path calls
-`mountActiveTerminal()` without checking `isFocused && isVisible`.
+### Layer 2: host element hide (defensive)
+
+Even with terminal detach, the workspace **header** (buttons, checkboxes, meters, subtab
+bar) can still overlay the dashboard. Root cause: Tabby manages tab visibility via
+`content-tab-active` class on `<tab-body>` (`left: 0` vs `left: -1000%`). In edge cases
+Tabby fails to remove `content-tab-active` from the workspace's `<tab-body>`, leaving both
+tabs at `left: 0` — the workspace renders on top due to DOM order.
+
+Fix: `hideHost()` / `showHost()` set `display: none/''` on both the workspace's `:host`
+element AND the parent `<tab-body>` (found via `closest('tab-body')`). Setting only `:host`
+to `display: none` is insufficient — the `<tab-body>` itself has a dark background
+(`rgb(30, 31, 41)`) and full viewport dimensions, so it covers the dashboard even when the
+component inside is hidden. Called from `blurred$`, `visibility$(false)`, `focused$`, and
+`visibility$(true)`.
+
+If the issue recurs: check that BOTH handlers call `hideHost()`, and that no new code path
+calls `showHost()` or `mountActiveTerminal()` without checking `isFocused && isVisible`.
 
 ## Performance — never use sync I/O on the renderer main thread
 
@@ -92,14 +108,77 @@ Rule: always use absolute paths in Docker volume mounts, never `~`.
 Tabby's `ConfigService` deep-merges saved config with `ConfigProvider.defaults`. Keys not
 declared in defaults may be stripped on save/load, causing settings to vanish after restart.
 
-Fix: all persisted keys must be declared in `ClaudeCodeZitConfigProvider.defaults`.
+Fix: all persisted keys must be declared in `ClaudeDockConfigProvider.defaults`.
 
 Per-workspace settings (useDockerSandbox, mountClaudeDir, dangerouslySkipPermissions) are
 stored inside workspace objects in the `workspaces` array, read via `this.workspace?.field`,
 and written via `workspaces.updateWorkspace(id, patch)`.
 
+## Debug logging — disabled by default
+
+`TabbyDebugService` writes structured JSON logs to `~/.claude/claude-dock/tabby-debug/`.
+Logging is **OFF by default**. It is gated by env `CLAUDE_DOCK_DEBUG=1` or Tabby config
+`claudeDock.debugLogging: true`.
+
+When you need to debug, enable it, reproduce the issue, then **always**:
+1. Disable logging back (`debugLogging: false` or remove the env var).
+2. Delete log files: `rm -rf ~/.claude/claude-dock/tabby-debug/`
+
+Never leave debug logging enabled after a session. Log files grow fast (~235 MB / 150 sessions)
+and have no rotation.
+
+## UI — semantic markup and accessibility conventions
+
+Both component templates (DashboardTab, WorkspaceTab) use semantic HTML and ARIA:
+
+- **Structure**: `<header>` for top bars, `<main>` for content areas, `<section>` for
+  standalone screens (setup), `<h1>` for page title, `<h2>` for section titles.
+- **Lists**: workspace list and todo list use `<ul>/<li>` (with `list-style: none`).
+  Never nest `<button>` inside `<button>` — use `<li>` as the outer clickable element
+  with `cursor: pointer` and an inner `<button>` for the action.
+- **Usage bars**: `role="meter"` with `aria-label`, `[attr.aria-valuenow]`,
+  `aria-valuemin="0"`, `aria-valuemax="100"` on all `.cz-usage-bar` / `.cz-ws-usage-bar`
+  elements.
+- **Tab bar**: `.cz-subtabs` has `role="tablist"` + `aria-label="Terminal tabs"`. Each
+  `.cz-subtab` has `role="tab"`, `[attr.aria-selected]`, `[attr.tabindex]` (0 for active,
+  -1 for inactive). Arrow keys navigate between tabs (`onSubtabKeydown`). Terminal host
+  has `role="tabpanel"`.
+- **Selects**: every `<select>` has an `aria-label` (e.g., "Sort workspaces", "Resume
+  session", "Git branch").
+- **CSS tokens**: all colors, border-radius, and font-family values are defined as CSS
+  custom properties in `:host` (e.g., `--cz-green`, `--cz-radius`, `--cz-font-mono`).
+  Never use hardcoded hex/rgba values — always reference the token.
+- **Display name**: the plugin is titled "Claude Dock" in the UI.
+
+## Development — Tabby remote debugging
+
+To inspect the plugin live in Chrome DevTools (or via MCP debug-in-chrome-with-devtools),
+launch Tabby with the remote debugging flag:
+
+```bash
+~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222
+```
+
+This enables Chrome DevTools Protocol on port 9222. Tabby always exposes exactly one page
+(`file:///...app.asar/dist/index.html`) -- skip `list_pages` and go straight to
+`take_screenshot`, `evaluate_script`, `take_snapshot` to inspect DOM and debug layout.
+Use `@electron/remote` via `evaluate_script` to resize the window for responsive testing:
+`require('@electron/remote').getCurrentWindow().setSize(width, height)`.
+
+To kill Tabby from Claude Code (Git Bash `taskkill //F` doesn't work — use PowerShell):
+```bash
+powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"
+```
+
+To restart Tabby with debugging:
+```bash
+powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"
+sleep 2
+~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222 &
+```
+
 ## Plugin system — orphaning and enabledPlugins
 
 Claude Code orphans plugins in `~/.claude/plugins/cache/` that are not listed in
 `settings.json` `enabledPlugins`. The install script must add the plugin key
-(`troshab@claude-code-zit`) to `enabledPlugins` and remove `.orphaned_at` markers.
+(`troshab@claude-dock`) to `enabledPlugins` and remove `.orphaned_at` markers.

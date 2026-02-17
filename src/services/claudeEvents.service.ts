@@ -13,7 +13,7 @@ import { normalizePath, nowMs, safeJsonParse } from '../utils'
 import { TabbyDebugService } from './tabbyDebug.service'
 
 function getEventsPath (): string {
-  return path.join(os.homedir(), '.claude', 'claude-code-zit', 'events.jsonl')
+  return path.join(os.homedir(), '.claude', 'claude-dock', 'events.jsonl')
 }
 
 interface RealtimeEndpoint {
@@ -21,16 +21,16 @@ interface RealtimeEndpoint {
   path: string
 }
 
-const ZIT_TCP_PORT = 19542
+const DOCK_TCP_PORT = 19542
 
 function getRealtimeEndpoint (): RealtimeEndpoint {
-  const baseDir = path.join(os.homedir(), '.claude', 'claude-code-zit')
+  const baseDir = path.join(os.homedir(), '.claude', 'claude-dock')
   if (process.platform === 'win32') {
     const homeKey = os.homedir().toLowerCase()
     const hash = crypto.createHash('sha1').update(homeKey).digest('hex').slice(0, 10)
     return {
       kind: 'pipe',
-      path: `\\\\.\\pipe\\claude-code-zit-${hash}-events-v1`,
+      path: `\\\\.\\pipe\\claude-dock-${hash}-events-v1`,
     }
   }
   return {
@@ -131,13 +131,13 @@ export class ClaudeEventsService {
     this.tcpServer = net.createServer((socket) => this.handleRealtimeSocket(socket))
     this.tcpServer.on('error', (e: any) => {
       this.debug.log('events.tcp.server_error', {
-        port: ZIT_TCP_PORT,
+        port: DOCK_TCP_PORT,
         error: String(e?.message ?? e),
       })
     })
-    this.tcpServer.listen(ZIT_TCP_PORT, '0.0.0.0', () => {
+    this.tcpServer.listen(DOCK_TCP_PORT, '0.0.0.0', () => {
       this.debug.log('events.tcp.listening', {
-        port: ZIT_TCP_PORT,
+        port: DOCK_TCP_PORT,
       })
     })
   }
@@ -239,7 +239,7 @@ export class ClaudeEventsService {
   }
 
   private getTTLms (): number {
-    const minutes = (this.config as any).store?.claudeCodeZit?.sessionTTLMinutes ?? 30
+    const minutes = (this.config as any).store?.claudeDock?.sessionTTLMinutes ?? 30
     const n = Number(minutes)
     if (!Number.isFinite(n) || n <= 0) {
       return 30 * 60 * 1000
@@ -248,7 +248,7 @@ export class ClaudeEventsService {
   }
 
   private getStartOnlyNoPidTTLms (): number {
-    const minutes = (this.config as any).store?.claudeCodeZit?.startOnlyNoPidTTLMinutes ?? 5
+    const minutes = (this.config as any).store?.claudeDock?.startOnlyNoPidTTLMinutes ?? 5
     const n = Number(minutes)
     if (!Number.isFinite(n) || n <= 0) {
       return 5 * 60 * 1000

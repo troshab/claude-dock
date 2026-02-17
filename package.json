@@ -1,5 +1,5 @@
 {
-  "name": "@troshab/claude-code-zit",
+  "name": "@troshab/claude-dock",
   "version": "0.1.0",
   "description": "Pinned Claude Code dashboard + workspace tabs for Tabby",
   "main": "dist/index.js",
@@ -15,8 +15,8 @@
     "tabby-plugin"
   ],
   "tabbyPlugin": {
-    "name": "claude-code-zit",
-    "displayName": "Claude Code Zit",
+    "name": "claude-dock",
+    "displayName": "Claude Dock",
     "description": "Pinned Claude Code dashboard + workspace tabs"
   },
   "author": "tro",

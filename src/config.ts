@@ -1,8 +1,8 @@
 import { ConfigProvider } from 'tabby-core'
 
-export class ClaudeCodeZitConfigProvider extends ConfigProvider {
+export class ClaudeDockConfigProvider extends ConfigProvider {
   defaults = {
-    claudeCodeZit: {
+    claudeDock: {
       dashboardPinned: true,
       viewMode: 'flat',
       sortPreset: 'status',
@@ -12,6 +12,7 @@ export class ClaudeCodeZitConfigProvider extends ConfigProvider {
       workspaces: [],
       savedTerminals: {},
       lastActiveWorkspaceId: null,
+      debugLogging: false,
     },
   }
 }

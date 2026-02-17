@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Injector, Input, ViewChild, ViewContainerRef } from '@angular/core'
+import { ChangeDetectorRef, Component, ElementRef, Injector, Input, ViewChild, ViewContainerRef } from '@angular/core'
 import { AppService, BaseTabComponent, ConfigService, LogService, Logger, NotificationsService, ProfilesService, TabsService } from 'tabby-core'
 import * as childProcess from 'child_process'
 import * as fsSync from 'fs'
@@ -8,7 +8,7 @@ import * as path from 'path'
 import { WorkspacesService } from '../services/workspaces.service'
 import { ClaudeEventsService } from '../services/claudeEvents.service'
 import { ClaudeCloseGuardService } from '../services/closeGuard.service'
-import { ClaudeCodeZitLifecycleService } from '../services/lifecycle.service'
+import { ClaudeDockLifecycleService } from '../services/lifecycle.service'
 import { ClaudeUsageService } from '../services/claudeUsage.service'
 import { SessionRuntimeService, SystemResourceStat } from '../services/sessionRuntime.service'
 import { TabbyDebugService } from '../services/tabbyDebug.service'
@@ -31,14 +31,14 @@ interface ResumeCandidate {
 }
 
 @Component({
-  selector: 'claude-code-zit-workspace-tab',
+  selector: 'claude-dock-workspace-tab',
   template: `
-    <div class="cz-ws-header">
+    <header class="cz-ws-header">
       <div class="cz-ws-top-row">
         <div class="cz-ws-actions">
           <button class="btn btn-sm btn-success" (click)="newClaude()">New</button>
           <button class="btn btn-sm btn-outline-primary" (click)="continueClaude()">Continue</button>
-          <select class="form-select form-select-sm cz-resume-select" [value]="selectedResumeSessionId" (change)="onResumeSelectionChanged($any($event.target).value)">
+          <select class="form-select form-select-sm cz-resume-select" aria-label="Resume session" [value]="selectedResumeSessionId" (change)="onResumeSelectionChanged($any($event.target).value)">
             <option value="">Select session…</option>
             <option *ngFor="let x of resumeOptions" [value]="x.sessionId">
               {{ resumeLabel(x) }}
@@ -49,32 +49,32 @@ interface ResumeCandidate {
         </div>
         <div class="cz-ws-meters" *ngIf="systemStats || usage">
           <div class="cz-ws-meters-row" *ngIf="systemStats">
-            <div class="cz-ws-usage-item" title="System CPU load">
+            <div class="cz-ws-usage-item" aria-label="System CPU load">
               <span class="cz-ws-usage-label">CPU</span>
-              <div class="cz-ws-usage-bar">
+              <div class="cz-ws-usage-bar" role="meter" aria-label="CPU load" [attr.aria-valuenow]="clamp(systemStats?.cpuLoadPercent)" aria-valuemin="0" aria-valuemax="100">
                 <div class="cz-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.cpuLoadPercent)"></div>
               </div>
               <span class="cz-ws-usage-val">{{ cpuLabel() }}</span>
             </div>
-            <div class="cz-ws-usage-item" title="System RAM usage">
+            <div class="cz-ws-usage-item" aria-label="System RAM usage">
               <span class="cz-ws-usage-label">RAM</span>
-              <div class="cz-ws-usage-bar">
+              <div class="cz-ws-usage-bar" role="meter" aria-label="RAM usage" [attr.aria-valuenow]="clamp(systemStats?.usedMemoryPercent)" aria-valuemin="0" aria-valuemax="100">
                 <div class="cz-ws-usage-fill" [style.width.%]="100 - clamp(systemStats?.usedMemoryPercent)"></div>
               </div>
               <span class="cz-ws-usage-val">{{ ramLabel() }}</span>
             </div>
           </div>
           <div class="cz-ws-meters-row" *ngIf="usage">
-            <div class="cz-ws-usage-item" title="5-hour usage window">
+            <div class="cz-ws-usage-item" aria-label="5-hour usage window">
               <span class="cz-ws-usage-label">5h</span>
-              <div class="cz-ws-usage-bar">
+              <div class="cz-ws-usage-bar" role="meter" aria-label="5-hour usage" [attr.aria-valuenow]="usagePct(usage?.usage5h?.used)" aria-valuemin="0" aria-valuemax="100">
                 <div class="cz-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usage5h?.used)"></div>
               </div>
               <span class="cz-ws-usage-val">{{ usageLabel(usage?.usage5h) }}</span>
             </div>
-            <div class="cz-ws-usage-item" title="7-day usage window">
+            <div class="cz-ws-usage-item" aria-label="7-day usage window">
               <span class="cz-ws-usage-label">7d</span>
-              <div class="cz-ws-usage-bar">
+              <div class="cz-ws-usage-bar" role="meter" aria-label="7-day usage" [attr.aria-valuenow]="usagePct(usage?.usageWeek?.used)" aria-valuemin="0" aria-valuemax="100">
                 <div class="cz-ws-usage-fill" [style.width.%]="100 - usagePct(usage?.usageWeek?.used)"></div>
               </div>
               <span class="cz-ws-usage-val">{{ usageLabel(usage?.usageWeek) }}</span>
@@ -86,7 +86,7 @@ interface ResumeCandidate {
       <div class="cz-ws-info-row" *ngIf="workspace?.cwd">
         <span class="cz-ws-path">{{ normalizeCwd(workspace?.cwd || '') }}</span>
         <span class="cz-ws-branch" *ngIf="currentBranch">
-          (Git Branch: <select class="cz-branch-select"
+          (Git Branch: <select class="cz-branch-select" aria-label="Git branch"
             [value]="currentBranch"
             (change)="switchBranch($any($event.target).value)">
             <option *ngFor="let b of branches" [value]="b">{{ b }}</option>
@@ -106,40 +106,42 @@ interface ResumeCandidate {
         <label class="cz-ws-chk" [ngClass]="permsChkColor">
           <input type="checkbox" [checked]="skipPermissions"
             (change)="toggleSkipPermissions($any($event.target).checked)">
-          <span>Dangerously skip bypass</span>
+          <span>Dangerously skip permissions</span>
         </label>
       </div>
-    </div>
+    </header>
 
     <div *ngIf="!workspace" class="cz-muted cz-empty">
       Workspace not found.
     </div>
 
-    <div *ngIf="workspace" class="cz-ws-body">
-      <div class="cz-subtabs" *ngIf="terminals.length">
+    <main *ngIf="workspace" class="cz-ws-body">
+      <div class="cz-subtabs" role="tablist" aria-label="Terminal tabs" *ngIf="terminals.length" (keydown)="onSubtabKeydown($event)">
         <div
           class="cz-subtab"
+          role="tab"
           *ngFor="let t of terminals; trackBy: trackTerminalId"
           [class.active]="t.id === activeTerminalId"
+          [attr.aria-selected]="t.id === activeTerminalId"
+          [attr.tabindex]="t.id === activeTerminalId ? 0 : -1"
           (click)="activateTerminal(t.id)"
-          title="Click to focus"
         >
           <div class="cz-subtab-info">
             <div class="cz-subtab-title">{{ t.title }}</div>
             <div class="cz-subtab-runtime" *ngIf="subtabRuntime(t.id)">{{ subtabRuntime(t.id) }}</div>
           </div>
-          <button class="cz-subtab-close" title="Close" (click)="closeTerminal(t.id); $event.stopPropagation()">×</button>
+          <button class="cz-subtab-close" aria-label="Close terminal" (click)="closeTerminal(t.id); $event.stopPropagation()">×</button>
         </div>
       </div>
 
-      <div *ngIf="!terminals.length" class="cz-muted cz-empty cz-empty-terminals">
-        No Claudes Codes yet...
+      <div *ngIf="!terminals.length" class="cz-muted cz-empty">
+        No terminals yet.
       </div>
 
-      <div class="cz-terminal-host" [class.cz-terminal-active]="terminals.length > 0" (click)="focusTerminal()" (keydown)="onTerminalHostKey($event)">
+      <div class="cz-terminal-host" role="tabpanel" [attr.aria-label]="activeTerminalTitle()" [class.cz-terminal-active]="terminals.length > 0" (click)="focusTerminal()" (keydown)="onTerminalHostKey($event)">
         <ng-container #terminalHost></ng-container>
       </div>
-    </div>
+    </main>
   `,
   styles: [`
     :host {
@@ -151,16 +153,29 @@ interface ResumeCandidate {
       --cz-click-min: 28px;
       --cz-opacity-muted: 0.7;
       --cz-opacity-dim: 0.6;
+      --cz-green: #2cc878;
+      --cz-yellow: #d7a92a;
+      --cz-red: #d35b5b;
+      --cz-orange: #e67e22;
+      --cz-green-subtle: rgba(44, 200, 120, .08);
+      --cz-green-border: rgba(44, 200, 120, .35);
+      --cz-green-hover: rgba(44, 200, 120, .24);
+      --cz-green-active: rgba(44, 200, 120, .33);
+      --cz-border: rgba(255, 255, 255, .08);
+      --cz-border-light: rgba(255, 255, 255, .12);
+      --cz-overlay: rgba(0, 0, 0, .55);
+      --cz-radius: 8px;
+      --cz-radius-pill: 999px;
+      --cz-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
     .cz-muted { opacity: .7; }
-    .cz-empty { padding: 12px; }
-    .cz-empty-terminals { padding: 10px 12px !important; }
+    .cz-empty { padding: 8px 12px; }
 
-    .cz-ws-header { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 10px 10px 6px 10px; }
+    .cz-ws-header { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 10px 8px 10px; }
     .cz-ws-top-row { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; }
     .cz-ws-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; align-items: center; min-width: 0; }
     .cz-resume-select { width: 420px; min-width: 180px; max-width: 100%; flex-shrink: 1; }
-    .cz-ws-info-row { display: flex; align-items: center; gap: 6px; font-weight: 700; flex-wrap: wrap; margin-top: 6px; }
+    .cz-ws-info-row { display: flex; align-items: center; gap: 6px; font-weight: 700; flex-wrap: wrap; }
     .cz-ws-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cz-branch-select { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0 2px; }
     .cz-branch-select option { background: #1e1e2e; color: #d4d4d4; }
@@ -168,10 +183,10 @@ interface ResumeCandidate {
     .cz-ws-chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; opacity: .7; }
     .cz-ws-chk input { margin: 0; cursor: pointer; }
     .cz-ws-chk-disabled { opacity: .35; pointer-events: none; }
-    .cz-ws-chk-green  { opacity: 1; color: #2cc878; }  .cz-ws-chk-green  input { accent-color: #2cc878; }
-    .cz-ws-chk-yellow { opacity: 1; color: #d7a92a; }  .cz-ws-chk-yellow input { accent-color: #d7a92a; }
-    .cz-ws-chk-orange { opacity: 1; color: #e67e22; }  .cz-ws-chk-orange input { accent-color: #e67e22; }
-    .cz-ws-chk-red    { opacity: 1; color: #d35b5b; }  .cz-ws-chk-red    input { accent-color: #d35b5b; }
+    .cz-ws-chk-green  { opacity: 1; color: var(--cz-green); }  .cz-ws-chk-green  input { accent-color: var(--cz-green); }
+    .cz-ws-chk-yellow { opacity: 1; color: var(--cz-yellow); }  .cz-ws-chk-yellow input { accent-color: var(--cz-yellow); }
+    .cz-ws-chk-orange { opacity: 1; color: var(--cz-orange); }  .cz-ws-chk-orange input { accent-color: var(--cz-orange); }
+    .cz-ws-chk-red    { opacity: 1; color: var(--cz-red); }  .cz-ws-chk-red    input { accent-color: var(--cz-red); }
 
     .cz-ws-meters { display: flex; flex-direction: row; gap: 8px; flex-shrink: 0; }
     .cz-ws-meters-row { display: flex; gap: 8px; align-items: center; }
@@ -180,18 +195,18 @@ interface ResumeCandidate {
     .cz-ws-usage-bar {
       width: 60px;
       height: var(--cz-bar-height);
-      border-radius: 999px;
+      border-radius: var(--cz-radius-pill);
       overflow: hidden;
-      background: linear-gradient(90deg, #2cc878 0%, #2cc878 60%, #d7a92a 80%, #d35b5b 100%);
+      background: linear-gradient(90deg, var(--cz-green) 0%, var(--cz-green) 60%, var(--cz-yellow) 80%, var(--cz-red) 100%);
       position: relative;
     }
     .cz-ws-usage-fill {
       position: absolute;
       top: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,.55);
+      background: var(--cz-overlay);
       transition: width .2s ease;
     }
-    .cz-ws-usage-val { opacity: .7; min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+    .cz-ws-usage-val { opacity: var(--cz-opacity-muted); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 
     .cz-ws-body { display: flex; flex-direction: column; min-height: 0; min-width: 0; width: 100%; flex: 1; }
 
@@ -202,7 +217,7 @@ interface ResumeCandidate {
       flex-wrap: nowrap;
       margin: 0;
       padding: 0;
-      border-bottom: 1px solid rgba(255,255,255,.12);
+      border-bottom: 1px solid var(--cz-border-light);
       overflow-x: auto;
       overflow-y: hidden;
     }
@@ -221,11 +236,11 @@ interface ResumeCandidate {
       transition: opacity .15s;
     }
     .cz-subtab { background: rgba(44, 200, 120, .15); }
-    .cz-subtab:hover { opacity: .85; background: rgba(44, 200, 120, .24); }
+    .cz-subtab:hover { opacity: .85; background: var(--cz-green-hover); }
     .cz-subtab.active {
       opacity: 1;
-      background: rgba(44, 200, 120, .33);
-      border-bottom-color: rgba(44, 200, 120, 1);
+      background: var(--cz-green-active);
+      border-bottom-color: var(--cz-green);
     }
     .cz-subtab-info { display: flex; flex-direction: column; min-width: 0; }
     .cz-subtab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -301,12 +316,13 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private workspaces: WorkspacesService
   private events: ClaudeEventsService
   private closeGuard: ClaudeCloseGuardService
-  private lifecycle: ClaudeCodeZitLifecycleService
+  private lifecycle: ClaudeDockLifecycleService
   private debug: TabbyDebugService
   private runtimeSvc: SessionRuntimeService
   private usageSvc: ClaudeUsageService
   private terminalRegistry: WorkspaceTerminalRegistryService
   private cdr: ChangeDetectorRef
+  private hostRef: ElementRef
   private logger: Logger
 
   terminals: InternalTerminalSubTab[] = []
@@ -332,13 +348,14 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.workspaces = injector.get(WorkspacesService)
     this.events = injector.get(ClaudeEventsService)
     this.closeGuard = injector.get(ClaudeCloseGuardService)
-    this.lifecycle = injector.get(ClaudeCodeZitLifecycleService)
+    this.lifecycle = injector.get(ClaudeDockLifecycleService)
     this.debug = injector.get(TabbyDebugService)
     this.runtimeSvc = injector.get(SessionRuntimeService)
     this.usageSvc = injector.get(ClaudeUsageService)
     this.terminalRegistry = injector.get(WorkspaceTerminalRegistryService)
     this.cdr = injector.get(ChangeDetectorRef)
-    this.logger = injector.get(LogService).create('claude-code-zit')
+    this.hostRef = injector.get(ElementRef)
+    this.logger = injector.get(LogService).create('claude-dock')
 
     this.icon = 'fas fa-folder'
     // Prevent user from renaming this tab via Tabby's rename-tab dialog.
@@ -374,6 +391,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.subscribeUntilDestroyed(this.focused$, () => {
       this.isFocused = true
       this.isVisible = true
+      this.showHost()
       // Re-mount the terminal that was detached on blur
       this.mountActiveTerminal()
       this.refreshBranches()
@@ -389,6 +407,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     })
     this.subscribeUntilDestroyed(this.blurred$, () => {
       this.isFocused = false
+      this.hideHost()
       // Physically detach terminal so it doesn't overlay other tabs
       const active = this.getActiveTerminal()
       if (active) {
@@ -402,8 +421,10 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.subscribeUntilDestroyed(this.visibility$, (v: any) => {
       this.isVisible = !!v
       if (v && this.isFocused) {
+        this.showHost()
         this.mountActiveTerminal()
       } else if (!v) {
+        this.hideHost()
         // Detach terminal when tab becomes invisible — mirrors blurred$ handler.
         // blurred$ may not fire if focus was on a header element (checkbox, button, select).
         const active = this.getActiveTerminal()
@@ -420,7 +441,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   async getRecoveryToken (): Promise<any> {
     return {
-      type: 'app:claude-code-zit-workspace',
+      type: 'app:claude-dock-workspace',
       workspaceId: this.workspaceId,
     }
   }
@@ -610,7 +631,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     if (this.useDockerSandbox) {
       const dockerArgs = ['sandbox', 'run', '--name', 'claude-in-docker-sandbox',
         '-e', 'FORCE_COLOR=3',
-        '-e', `CLAUDE_CODE_ZIT_SOURCE=tabby`,
+        '-e', `CLAUDE_DOCK_SOURCE=tabby`,
       ]
       if (this.mountClaudeDir) {
         const claudeDir = path.join(os.homedir(), '.claude')
@@ -671,6 +692,26 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const mb = mem / (1024 * 1024)
     const memStr = mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
     return `${cpuStr} / ${memStr}`
+  }
+
+  /** Defensive: hide :host so workspace can't overlay other tabs even if Tabby
+   *  fails to remove content-tab-active from our parent tab-body. */
+  private hideHost (): void {
+    try {
+      this.hostRef.nativeElement.style.display = 'none'
+      // Also hide parent tab-body -- its background overlays other tabs
+      // even when the component itself is hidden.
+      const tabBody = this.hostRef.nativeElement.closest('tab-body')
+      if (tabBody) tabBody.style.display = 'none'
+    } catch { }
+  }
+
+  private showHost (): void {
+    try {
+      const tabBody = this.hostRef.nativeElement.closest('tab-body')
+      if (tabBody) tabBody.style.display = ''
+      this.hostRef.nativeElement.style.display = ''
+    } catch { }
   }
 
   private getActiveTerminal (): BaseTabComponent | null {
@@ -742,6 +783,35 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     if (active) {
       active.emitFocused?.()
     }
+  }
+
+  activeTerminalTitle (): string {
+    if (!this.activeTerminalId) return 'Terminal'
+    return this.terminals.find(t => t.id === this.activeTerminalId)?.title ?? 'Terminal'
+  }
+
+  onSubtabKeydown (event: KeyboardEvent): void {
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      this.activateNextTerminal()
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      this.activatePrevTerminal()
+    }
+  }
+
+  activateNextTerminal (): void {
+    if (!this.terminals.length) return
+    const idx = this.terminals.findIndex(t => t.id === this.activeTerminalId)
+    const next = this.terminals[(idx + 1) % this.terminals.length]
+    if (next) this.activateTerminal(next.id)
+  }
+
+  activatePrevTerminal (): void {
+    if (!this.terminals.length) return
+    const idx = this.terminals.findIndex(t => t.id === this.activeTerminalId)
+    const prev = this.terminals[(idx - 1 + this.terminals.length) % this.terminals.length]
+    if (prev) this.activateTerminal(prev.id)
   }
 
   onTerminalHostKey (event: KeyboardEvent): void {
@@ -1021,9 +1091,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       const env = {
         ...baseEnv,
         FORCE_COLOR: '3',
-        CLAUDE_CODE_ZIT_SOURCE: 'tabby',
-        CLAUDE_CODE_ZIT_TABBY_SESSION: this.debug.sessionId,
-        CLAUDE_CODE_ZIT_TERMINAL_ID: terminalId,
+        CLAUDE_DOCK_SOURCE: 'tabby',
+        CLAUDE_DOCK_TABBY_SESSION: this.debug.sessionId,
+        CLAUDE_DOCK_TERMINAL_ID: terminalId,
       }
 
       const options: any = {
@@ -1109,8 +1179,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         terminals_count: this.terminals.length,
         cwd,
         profile_id: profile?.id ?? null,
-        env_source_marker: env.CLAUDE_CODE_ZIT_SOURCE ?? null,
-        env_terminal_id: env.CLAUDE_CODE_ZIT_TERMINAL_ID ?? null,
+        env_source_marker: env.CLAUDE_DOCK_SOURCE ?? null,
+        env_terminal_id: env.CLAUDE_DOCK_TERMINAL_ID ?? null,
         launch: launch ?? null,
       })
     } catch (e: any) {
@@ -1202,8 +1272,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private saveTerminalState (): void {
     const store = (this.cfg as any).store
     if (!store || !this.workspaceId) return
-    store.claudeCodeZit ??= {}
-    store.claudeCodeZit.savedTerminals ??= {}
+    store.claudeDock ??= {}
+    store.claudeDock.savedTerminals ??= {}
 
     const sessions = this.events.sessions$.value ?? []
     const saved: SavedTerminal[] = []
@@ -1216,9 +1286,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     }
 
     if (saved.length) {
-      store.claudeCodeZit.savedTerminals[this.workspaceId] = saved
+      store.claudeDock.savedTerminals[this.workspaceId] = saved
     } else {
-      delete store.claudeCodeZit.savedTerminals[this.workspaceId]
+      delete store.claudeDock.savedTerminals[this.workspaceId]
     }
     this.cfg.save()
   }
@@ -1227,11 +1297,11 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const store = (this.cfg as any).store
     if (!store || !this.workspaceId) return
     const saved: SavedTerminal[] =
-      store.claudeCodeZit?.savedTerminals?.[this.workspaceId]
+      store.claudeDock?.savedTerminals?.[this.workspaceId]
     if (!saved?.length) return
 
     // Clear saved state immediately to avoid double-restore
-    delete store.claudeCodeZit.savedTerminals[this.workspaceId]
+    delete store.claudeDock.savedTerminals[this.workspaceId]
     this.cfg.save()
 
     this.debug.log('workspace.restore_terminals', {

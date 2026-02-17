@@ -10,7 +10,7 @@ import { WorkspaceTabComponent } from './components/workspaceTab.component'
 import { pathBase } from './utils'
 
 @Injectable()
-export class ClaudeCodeZitCommandProvider extends CommandProvider {
+export class ClaudeDockCommandProvider extends CommandProvider {
   private app: AppService
   private cfg: ConfigService
   private notifications: NotificationsService
@@ -126,8 +126,8 @@ export class ClaudeCodeZitCommandProvider extends CommandProvider {
     if (!store) {
       return
     }
-    store.claudeCodeZit ??= {}
-    store.claudeCodeZit.notifyOnWaiting = !store.claudeCodeZit.notifyOnWaiting
+    store.claudeDock ??= {}
+    store.claudeDock.notifyOnWaiting = !store.claudeDock.notifyOnWaiting
     this.cfg.save()
   }
 
@@ -135,21 +135,21 @@ export class ClaudeCodeZitCommandProvider extends CommandProvider {
     const cmds: Command[] = []
 
     cmds.push({
-      id: 'claude-code-zit:focus-dashboard',
+      id: 'claude-dock:focus-dashboard',
       label: 'Claude: Focus dashboard',
       weight: -10,
       run: async () => this.focusDashboard(),
     })
 
     cmds.push({
-      id: 'claude-code-zit:new-workspace',
+      id: 'claude-dock:new-workspace',
       label: 'Claude: New workspace',
       weight: 0,
       run: async () => this.createWorkspace(),
     })
 
     cmds.push({
-      id: 'claude-code-zit:open-workspace',
+      id: 'claude-dock:open-workspace',
       label: 'Claude: Open workspace…',
       locations: [CommandLocation.StartPage],
       weight: 1,
@@ -157,7 +157,7 @@ export class ClaudeCodeZitCommandProvider extends CommandProvider {
     })
 
     cmds.push({
-      id: 'claude-code-zit:open-workspace-folder',
+      id: 'claude-dock:open-workspace-folder',
       label: 'Claude: Open workspace folder…',
       locations: [CommandLocation.StartPage, CommandLocation.LeftToolbar],
       weight: -9,
@@ -166,22 +166,22 @@ export class ClaudeCodeZitCommandProvider extends CommandProvider {
     })
 
     cmds.push({
-      id: 'claude-code-zit:open-workspace-from-active-tab',
+      id: 'claude-dock:open-workspace-from-active-tab',
       label: 'Claude: Open workspace from active tab',
       weight: -8,
       run: async () => this.openWorkspaceFromActiveTab(),
     })
 
     cmds.push({
-      id: 'claude-code-zit:toggle-notify-waiting',
-      label: `Claude: Notify on waiting (${(this.cfg as any).store?.claudeCodeZit?.notifyOnWaiting ? 'on' : 'off'})`,
+      id: 'claude-dock:toggle-notify-waiting',
+      label: `Claude: Notify on waiting (${(this.cfg as any).store?.claudeDock?.notifyOnWaiting ? 'on' : 'off'})`,
       locations: [CommandLocation.StartPage],
       weight: 2,
       run: async () => this.toggleWaitingNotifications(),
     })
 
     cmds.push({
-      id: 'claude-code-zit:open-plugins-dir',
+      id: 'claude-dock:open-plugins-dir',
       label: 'Claude: Open Tabby plugins directory',
       locations: [CommandLocation.StartPage],
       weight: 50,

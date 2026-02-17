@@ -20,6 +20,7 @@ export class TabbyDebugService {
   private startedAt = Date.now()
   private seq = 0
   private writeFailed = false
+  private stream: fs.WriteStream | null = null
 
   constructor (injector: Injector) {
     const stamp = sanitize(new Date().toISOString().replace(/[:.]/g, '-'))
@@ -29,6 +30,13 @@ export class TabbyDebugService {
 
     try {
       fs.mkdirSync(path.dirname(this.logPath), { recursive: true })
+      this.stream = fs.createWriteStream(this.logPath, { flags: 'a', encoding: 'utf8' })
+      this.stream.on('error', () => {
+        if (!this.writeFailed) {
+          this.writeFailed = true
+          try { console.error('[claude-code-zit] failed writing debug log', this.logPath) } catch { }
+        }
+      })
     } catch { }
 
     this.log('tabby.session.start', {
@@ -110,17 +118,8 @@ export class TabbyDebugService {
       event,
       data: data ?? {},
     }
-    try {
-      fs.appendFileSync(this.logPath, JSON.stringify(line) + '\n', 'utf8')
-    } catch {
-      if (!this.writeFailed) {
-        this.writeFailed = true
-        try {
-          // Fallback to stderr once; debug logging must never crash the plugin.
-          // eslint-disable-next-line no-console
-          console.error('[claude-code-zit] failed writing debug log', this.logPath)
-        } catch { }
-      }
+    if (this.stream && !this.writeFailed) {
+      this.stream.write(JSON.stringify(line) + '\n')
     }
   }
 }

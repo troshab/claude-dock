@@ -11,7 +11,7 @@ import { ClaudeCodeZitLifecycleService } from '../services/lifecycle.service'
 import { HookHealthService, HookHealthStatus } from '../services/hookHealth.service'
 import { SessionRuntimeService, SystemResourceStat } from '../services/sessionRuntime.service'
 import { WorkspacesService } from '../services/workspaces.service'
-import { ClaudeSession, ClaudeTodoStatus, GroupSortPreset, SessionGroup, SortPreset, UsageSummary, ViewMode, Workspace } from '../models'
+import { ClaudeSession, ClaudeTodoStatus, GroupSortPreset, SessionGroup, SortPreset, UsageSummary, Workspace } from '../models'
 import { displayPath, formatAge, normalizePath, pathBase, usageLabel, usagePct } from '../utils'
 import { WorkspaceTabComponent } from './workspaceTab.component'
 
@@ -22,11 +22,10 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       <div class="cz-header">
         <div class="cz-title">
           <div class="cz-title-main">zit</div>
+          <button class="btn btn-sm btn-outline-primary cz-open-folder" (click)="openWorkspaceFolder()">
+            Open folder
+          </button>
         </div>
-
-        <button class="btn btn-sm btn-outline-primary cz-open-folder" (click)="openWorkspaceFolder()">
-          Open folder
-        </button>
 
         <div class="cz-usage-head">
           <div class="cz-usage-mini" title="5-hour usage window">
@@ -63,43 +62,25 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
         </div>
 
         <div class="cz-controls">
-          <label class="cz-group-toggle" title="Group sessions by project">
-            <input
-              type="checkbox"
-              [checked]="viewMode === 'grouped'"
-              (change)="setGrouped($any($event.target).checked)"
-            />
-            <span>Grouped</span>
-          </label>
+          <select class="form-select form-select-sm cz-select" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
+            <option value="none">Workspace: not sorted</option>
+            <option value="waiting">Workspace: waiting first</option>
+            <option value="path">Workspace: path</option>
+          </select>
 
           <select class="form-select form-select-sm cz-select" [value]="sortPreset" (change)="setSortPreset($any($event.target).value)">
-            <option value="status">Status (waiting first)</option>
-            <option value="startAsc">Start time (asc)</option>
-            <option value="startDesc">Start time (desc)</option>
-            <option value="lastActivityDesc">Last activity</option>
+            <option value="status">Session: waiting first</option>
+            <option value="startAsc">Session: start (asc)</option>
+            <option value="startDesc">Session: start (desc)</option>
+            <option value="lastActivityDesc">Session: last activity</option>
           </select>
-
-          <select
-            class="form-select form-select-sm cz-select"
-            [value]="groupSortPreset"
-            [disabled]="viewMode !== 'grouped'"
-            [class.cz-control-hidden]="viewMode !== 'grouped'"
-            (change)="setGroupSortPreset($any($event.target).value)"
-          >
-            <option value="waiting">Project sort: waiting</option>
-            <option value="path">Project sort: path</option>
-          </select>
-
         </div>
 
       </div>
 
       <div class="cz-grid">
         <div class="cz-col">
-          <div class="cz-section-title">
-            Recent workspaces
-            <span class="cz-muted">({{ workspaces.length }})</span>
-          </div>
+          <div class="cz-section-title">Open workspace</div>
 
           <div *ngIf="!workspaces.length" class="cz-muted cz-empty">
             No recent workspaces yet.
@@ -128,50 +109,8 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
             <div>No sessions yet.</div>
           </div>
 
-        <div *ngIf="viewMode === 'flat'">
-          <div class="list-group cz-list">
-            <button
-              type="button"
-              class="list-group-item list-group-item-action cz-row"
-              *ngFor="let s of sessionsSorted"
-              (click)="openWorkspaceForSession(s)"
-            >
-              <div class="cz-row-top">
-                <div class="cz-row-title">
-                  <span class="cz-strong">{{ sessionLabel(s) }}</span>
-                </div>
-                <div class="cz-row-right">
-                  <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-danger cz-session-close"
-                    [disabled]="!canCloseSession(s)"
-                    (click)="closeSession(s, $event)"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <div class="cz-row-bottom">
-                <span class="cz-muted cz-small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-                <span class="cz-muted cz-small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-                <span class="cz-muted cz-small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
-                <span class="cz-muted cz-small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
-              </div>
-
-              <div class="cz-todos" *ngIf="todosFor(s).length">
-                <div class="cz-todo" *ngFor="let t of todosFor(s)">
-                  <span class="cz-todo-check" [class.done]="t.status === 'completed'">{{ todoMark(t.status) }}</span>
-                  <span class="cz-todo-text" [class.done]="t.status === 'completed'">{{ t.content }}</span>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <div *ngIf="viewMode === 'grouped'">
-          <details class="cz-group" *ngFor="let g of groupsSorted; trackBy: trackGroupKey" [open]="isGroupOpen(g)" (toggle)="setGroupOpen(g, $event)">
+        <div>
+          <details class="cz-group" *ngFor="let g of groupsSorted; trackBy: trackGroupKey" [attr.open]="isGroupOpen(g) ? '' : null" (toggle)="setGroupOpen(g, $event)">
             <summary class="cz-group-summary">
               <span class="cz-strong">{{ g.projectName }}</span>
               <span class="cz-muted cz-small">{{ normalizeCwd(g.cwd) }}</span>
@@ -270,7 +209,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
     .cz-header { display: flex; gap: 12px; align-items: center; justify-content: flex-start; flex-wrap: wrap; margin-bottom: 12px; width: 100%; }
-    .cz-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+    .cz-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; align-items: center; align-self: stretch; justify-content: center; gap: 6px; }
     .cz-title-main { font-weight: 700; font-size: 1.15em; }
     .cz-open-folder { white-space: nowrap; }
     .cz-usage-head { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 8px; align-items: center; flex: 1; min-width: 320px; }
@@ -297,7 +236,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cz-runtime-head { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 1; overflow: hidden; }
     .cz-runtime-pill {
       display: inline-grid;
-      grid-template-columns: auto auto;
+      grid-template-columns: auto 1fr;
       align-items: center;
       gap: 2px 6px;
       padding: 4px 8px;
@@ -306,9 +245,9 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       font-weight: 600;
       background: rgba(44, 200, 120, .08);
     }
-    .cz-runtime-name { opacity: .9; }
-    .cz-runtime-sub { opacity: var(--cz-opacity-dim); font-size: 0.85em; font-weight: 500; }
-    .cz-runtime-claude-val { opacity: var(--cz-opacity-muted); font-size: 0.85em; }
+    .cz-runtime-name { opacity: .9; justify-self: start; }
+    .cz-runtime-sub { opacity: var(--cz-opacity-dim); font-size: 0.85em; font-weight: 500; justify-self: start; }
+    .cz-runtime-claude-val { opacity: var(--cz-opacity-muted); font-size: 0.85em; justify-self: end; }
     .cz-runtime-value {
       display: inline-block;
       text-align: right;
@@ -319,27 +258,8 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     }
     .cz-runtime-value-cpu { width: 6ch; }
     .cz-runtime-value-ram { width: 11ch; }
-    .cz-controls { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; justify-content: flex-end; }
-    .cz-group-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid rgba(255,255,255,.16);
-      border-radius: 6px;
-      padding: 4px 8px;
-      white-space: nowrap;
-      user-select: none;
-      min-width: 86px;
-      justify-content: center;
-    }
-    .cz-group-toggle input {
-      margin: 0;
-      accent-color: #2cc878;
-      width: 16px;
-      height: 16px;
-    }
+    .cz-controls { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
     .cz-select { width: 220px; max-width: 100%; min-width: 0; }
-    .cz-control-hidden { visibility: hidden; }
 
     .cz-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: 12px; min-height: 0; width: 100%; }
     @media (max-width: 1200px) {
@@ -368,7 +288,6 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       .cz-usage-reset { display: none; }
       .cz-controls { flex-direction: column; align-items: stretch; }
       .cz-select { width: 100%; }
-      .cz-group-toggle { width: 100%; }
     }
     .cz-col { min-height: 0; }
 
@@ -474,7 +393,6 @@ export class DashboardTabComponent extends BaseTabComponent {
   private runtimeSvc: SessionRuntimeService
   private workspacesSvc: WorkspacesService
 
-  viewMode: ViewMode
   sortPreset: SortPreset
   groupSortPreset: GroupSortPreset
 
@@ -490,6 +408,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   installRunning = false
   installOutput = ''
   private groupOpenState: Record<string, boolean> = {}
+  private viewReady = false
 
   constructor (injector: Injector) {
     super(injector)
@@ -509,9 +428,10 @@ export class DashboardTabComponent extends BaseTabComponent {
 
     this.setTitle('Claude Code')
     this.icon = 'fas fa-table'
+    // Prevent user from renaming this tab via Tabby's rename-tab dialog.
+    Object.defineProperty(this, 'customTitle', { get: () => '', set: () => {} })
 
     // ConfigService.store may be undefined very early during startup.
-    this.viewMode = ((this.cfg as any).store?.claudeCodeZit?.viewMode ?? 'flat') as ViewMode
     this.sortPreset = ((this.cfg as any).store?.claudeCodeZit?.sortPreset ?? 'status') as SortPreset
     this.groupSortPreset = ((this.cfg as any).store?.claudeCodeZit?.groupSortPreset ?? 'waiting') as GroupSortPreset
 
@@ -543,6 +463,11 @@ export class DashboardTabComponent extends BaseTabComponent {
     this.recompute()
   }
 
+  ngAfterViewInit (): void {
+    this.viewReady = true
+    this.recompute()
+  }
+
   async canClose (): Promise<boolean> {
     if (this.lifecycle.closing) {
       return this.closeGuard.confirmWindowClose()
@@ -554,11 +479,9 @@ export class DashboardTabComponent extends BaseTabComponent {
   }
 
   private onConfigChanged (): void {
-    const nextViewMode = ((this.cfg as any).store?.claudeCodeZit?.viewMode ?? this.viewMode) as ViewMode
     const nextSort = ((this.cfg as any).store?.claudeCodeZit?.sortPreset ?? this.sortPreset) as SortPreset
     const nextGroupSort = ((this.cfg as any).store?.claudeCodeZit?.groupSortPreset ?? this.groupSortPreset) as GroupSortPreset
-    const changed = nextViewMode !== this.viewMode || nextSort !== this.sortPreset || nextGroupSort !== this.groupSortPreset
-    this.viewMode = nextViewMode
+    const changed = nextSort !== this.sortPreset || nextGroupSort !== this.groupSortPreset
     this.sortPreset = nextSort
     this.groupSortPreset = nextGroupSort
     if (changed) {
@@ -570,20 +493,6 @@ export class DashboardTabComponent extends BaseTabComponent {
   private refreshWorkspaces (): void {
     this.workspaces = this.workspacesSvc.list()
     this.detectChanges()
-  }
-
-  setGrouped (grouped: boolean): void {
-    this.viewMode = grouped ? 'grouped' : 'flat'
-    const store = (this.cfg as any).store
-    if (!store) return
-    store.claudeCodeZit ??= {}
-    store.claudeCodeZit.viewMode = this.viewMode
-    this.cfg.save()
-    this.recompute()
-  }
-
-  toggleViewMode (): void {
-    this.setGrouped(this.viewMode === 'flat')
   }
 
   setSortPreset (preset: SortPreset): void {
@@ -668,6 +577,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   setGroupOpen (g: SessionGroup, event: any): void {
     const key = this.groupKey(g)
     const open = !!event?.target?.open
+    if (this.groupOpenState[key] === open) return
     this.groupOpenState[key] = open
   }
 
@@ -875,6 +785,10 @@ export class DashboardTabComponent extends BaseTabComponent {
       g.sessions = this.sortSessions(g.sessions)
     }
 
+    if (this.groupSortPreset === 'none') {
+      return list
+    }
+
     if (this.groupSortPreset === 'path') {
       list.sort((a, b) => normalizePath(a.cwd).localeCompare(normalizePath(b.cwd)))
       return list
@@ -903,6 +817,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   }
 
   private detectChanges (): void {
+    if (!this.viewReady) return
     try {
       // Tabby uses default change detection, but file polling events arrive outside user actions.
       this.cdr.detectChanges()

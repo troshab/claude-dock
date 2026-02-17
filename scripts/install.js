@@ -119,7 +119,77 @@ function copyDirSync (src, dest, exclude = []) {
   }
 }
 
-// --- 3. Clean up legacy ---
+// --- 3. Register hooks in settings.json ---
+
+function registerHooks () {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+  const version = pkg.version || '0.1.0'
+  const hookScript = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-code-zit', 'zit', version, 'claude-code-zit-hook.js')
+    .replace(/\\/g, '/')
+
+  const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
+  if (!fs.existsSync(settingsPath)) return
+
+  try {
+    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')
+    const settings = JSON.parse(raw)
+
+    // Remove broken enabledPlugins entry if present
+    if (settings.enabledPlugins && settings.enabledPlugins['troshab@claude-code-zit'] !== undefined) {
+      delete settings.enabledPlugins['troshab@claude-code-zit']
+    }
+
+    if (!settings.hooks || typeof settings.hooks !== 'object') {
+      settings.hooks = {}
+    }
+
+    const hookEvents = {
+      SessionStart: 'session_start',
+      PreToolUse: 'tool_start',
+      PostToolUse: 'tool_end',
+      Stop: 'stop',
+      Notification: 'notification',
+      SessionEnd: 'session_end',
+    }
+
+    let modified = false
+    for (const [eventName, eventArg] of Object.entries(hookEvents)) {
+      if (!Array.isArray(settings.hooks[eventName])) {
+        settings.hooks[eventName] = []
+      }
+
+      // Check if our hook is already registered
+      const alreadyRegistered = settings.hooks[eventName].some(entry =>
+        Array.isArray(entry?.hooks) && entry.hooks.some(h =>
+          String(h?.command ?? '').includes('claude-code-zit-hook')
+        )
+      )
+      if (alreadyRegistered) continue
+
+      settings.hooks[eventName].push({
+        hooks: [{
+          type: 'command',
+          command: `node "${hookScript}" --hook --event ${eventArg}`,
+          timeout: 10000,
+        }],
+      })
+      modified = true
+    }
+
+    if (modified) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      fs.copyFileSync(settingsPath, `${settingsPath}.bak-${ts}`)
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+      console.log('Hooks registered in settings.json')
+    } else {
+      console.log('Hooks already registered in settings.json')
+    }
+  } catch (e) {
+    console.log(`Warning: could not update settings.json: ${e.message}`)
+  }
+}
+
+// --- 4. Clean up legacy files ---
 
 function cleanupLegacy () {
   const legacyFiles = [
@@ -132,53 +202,13 @@ function cleanupLegacy () {
       console.log(`Removed legacy: ${f}`)
     }
   }
-
-  // Remove claude-code-zit entries from settings.json hooks
-  const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
-  if (!fs.existsSync(settingsPath)) return
-
-  try {
-    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')
-    const settings = JSON.parse(raw)
-    if (!settings.hooks || typeof settings.hooks !== 'object') return
-
-    let modified = false
-    const events = ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification', 'SessionEnd']
-
-    for (const eventName of events) {
-      const arr = settings.hooks[eventName]
-      if (!Array.isArray(arr)) continue
-
-      const filtered = arr.filter(matcherEntry => {
-        if (!Array.isArray(matcherEntry?.hooks)) return true
-        matcherEntry.hooks = matcherEntry.hooks.filter(h => {
-          const cmd = String(h?.command ?? '')
-          return !cmd.includes('claude-code-zit')
-        })
-        return matcherEntry.hooks.length > 0
-      })
-
-      if (filtered.length !== arr.length) {
-        settings.hooks[eventName] = filtered
-        modified = true
-      }
-    }
-
-    if (modified) {
-      const ts = new Date().toISOString().replace(/[:.]/g, '-')
-      fs.copyFileSync(settingsPath, `${settingsPath}.bak-${ts}`)
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
-      console.log('Cleaned legacy hooks from settings.json')
-    }
-  } catch (e) {
-    console.log(`Warning: could not clean settings.json: ${e.message}`)
-  }
 }
 
 // --- Run ---
 
 try {
   deployCCPlugin()
+  registerHooks()
   linkTabbyPlugin()
   cleanupLegacy()
   console.log('\nDone. Restart Claude Code + Tabby to activate.')

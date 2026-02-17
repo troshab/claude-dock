@@ -902,7 +902,7 @@ export class ClaudeEventsService {
     const file = this.eventsPath
     let stat: fs.Stats
     try {
-      stat = fs.statSync(file)
+      stat = await fs.promises.stat(file)
     } catch {
       // No file yet.
       if (!this.missingEventsFileLogged) {
@@ -954,10 +954,11 @@ export class ClaudeEventsService {
     }
 
     const len = stat.size - this.offset
-    const fd = fs.openSync(file, 'r')
+    let fh: fs.promises.FileHandle | null = null
     try {
+      fh = await fs.promises.open(file, 'r')
       const buf = Buffer.alloc(len)
-      fs.readSync(fd, buf, 0, len, this.offset)
+      await fh.read(buf, 0, len, this.offset)
       this.offset = stat.size
 
       this.partialLine += buf.toString('utf8')
@@ -995,7 +996,7 @@ export class ClaudeEventsService {
         offset_after: this.offset,
       })
     } finally {
-      fs.closeSync(fd)
+      await fh?.close()
     }
 
     this.trimAndPublish()

@@ -106,7 +106,7 @@ interface ResumeCandidate {
         <label class="cz-ws-chk" [ngClass]="permsChkColor">
           <input type="checkbox" [checked]="skipPermissions"
             (change)="toggleSkipPermissions($any($event.target).checked)">
-          <span>--dangerously-skip-permissions</span>
+          <span>Dangerously skip bypass</span>
         </label>
       </div>
     </div>
@@ -160,7 +160,7 @@ interface ResumeCandidate {
     .cz-ws-top-row { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; }
     .cz-ws-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; align-items: center; min-width: 0; }
     .cz-resume-select { width: 420px; min-width: 180px; max-width: 100%; flex-shrink: 1; }
-    .cz-ws-info-row { display: flex; align-items: center; gap: 6px; font-weight: 700; flex-wrap: wrap; }
+    .cz-ws-info-row { display: flex; align-items: center; gap: 6px; font-weight: 700; flex-wrap: wrap; margin-top: 6px; }
     .cz-ws-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cz-branch-select { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0 2px; }
     .cz-branch-select option { background: #1e1e2e; color: #d4d4d4; }
@@ -175,7 +175,7 @@ interface ResumeCandidate {
 
     .cz-ws-meters { display: flex; flex-direction: row; gap: 8px; flex-shrink: 0; }
     .cz-ws-meters-row { display: flex; gap: 8px; align-items: center; }
-    .cz-ws-usage-item { display: grid; grid-template-columns: 3ch 60px auto; align-items: center; gap: 4px; white-space: nowrap; }
+    .cz-ws-usage-item { display: grid; grid-template-columns: 4ch 60px auto; align-items: center; gap: 4px; white-space: nowrap; }
     .cz-ws-usage-label { font-weight: 700; opacity: .7; text-transform: uppercase; }
     .cz-ws-usage-bar {
       width: 60px;
@@ -249,6 +249,7 @@ interface ResumeCandidate {
     :host ::ng-deep .cz-terminal-host .tab-content { padding: 0 !important; margin: 0 !important; }
     :host ::ng-deep .cz-terminal-host terminal-toolbar { display: none !important; }
     :host ::ng-deep .cz-terminal-host > :first-child { padding: 0 !important; margin: 0 !important; }
+    :host ::ng-deep .cz-terminal-host .xterm { padding: 6px 0 0 10px; }
 
     @media (max-width: 600px) {
       .cz-resume-select { width: 100%; min-width: 0; }
@@ -271,6 +272,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private isVisible = true
   private isFocused = false
   private mountedTerminalId: string | null = null
+  private viewReady = false
 
   @ViewChild('terminalHost', { read: ViewContainerRef }) private terminalHost?: ViewContainerRef
 
@@ -318,7 +320,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private lastResumeDebugSig = ''
   private promptCache = new Map<string, string>()
   private lastProjectDirMtimeMs = 0
-  private launchTimers: ReturnType<typeof setInterval>[] = []
+
 
   constructor (injector: Injector) {
     super(injector)
@@ -339,26 +341,33 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.logger = injector.get(LogService).create('claude-code-zit')
 
     this.icon = 'fas fa-folder'
+    // Prevent user from renaming this tab via Tabby's rename-tab dialog.
+    Object.defineProperty(this, 'customTitle', { get: () => '', set: () => {} })
     this.debug.log('workspace.tab.init', {
       workspace_id: this._workspaceId,
     })
 
     // Workspace data can appear after the tab is created (config loads, inputs assigned).
-    this.subscribeUntilDestroyed(this.cfg.changed$, () => this.loadWorkspace())
+    // Debounce to avoid feedback loop: cfg.save() -> changed$ -> loadWorkspace -> refreshBranches -> repeat
+    let loadTimer: any
+    this.subscribeUntilDestroyed(this.cfg.changed$, () => {
+      clearTimeout(loadTimer)
+      loadTimer = setTimeout(() => this.loadWorkspace(), 300)
+    })
     this.subscribeUntilDestroyed(this.events.sessions$, () => {
       this.refreshResumeOptions()
       this.saveTerminalState()
     })
     this.subscribeUntilDestroyed(this.usageSvc.summary$, (s: UsageSummary | null) => {
       this.usage = s
-      try { this.cdr.detectChanges() } catch { }
+      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
     })
     this.subscribeUntilDestroyed(this.runtimeSvc.stats$, () => {
-      try { this.cdr.detectChanges() } catch { }
+      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
     })
     this.subscribeUntilDestroyed(this.runtimeSvc.system$, (s: SystemResourceStat | null) => {
       this.systemStats = s
-      try { this.cdr.detectChanges() } catch { }
+      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
     })
 
     // Forward focus/visibility to the embedded terminal so keyboard and rendering behave.
@@ -409,6 +418,13 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     })
   }
 
+  async getRecoveryToken (): Promise<any> {
+    return {
+      type: 'app:claude-code-zit-workspace',
+      workspaceId: this.workspaceId,
+    }
+  }
+
   async canClose (): Promise<boolean> {
     if (this.lifecycle.closing) {
       return this.closeGuard.confirmWindowClose()
@@ -425,6 +441,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   }
 
   ngAfterViewInit (): void {
+    this.viewReady = true
     this.debug.log('workspace.tab.ngAfterViewInit', {
       workspace_id: this.workspaceId,
       has_terminal_host: !!this.terminalHost,
@@ -460,52 +477,44 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     })
     this.refreshResumeOptions()
     this.refreshBranches()
-    try {
-      this.cdr.detectChanges()
-    } catch { }
+    if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
   }
 
   normalizeCwd (cwd: string): string {
     return displayPath(cwd)
   }
 
-  // --- Sandbox / mount / permissions checkboxes (global, shared across workspaces) ---
-
-  private get zitStore (): any {
-    const store = (this.cfg as any).store
-    if (!store) return {}
-    store.claudeCodeZit ??= {}
-    return store.claudeCodeZit
-  }
+  // --- Sandbox / mount / permissions checkboxes (per-workspace) ---
 
   get useDockerSandbox (): boolean {
-    return !!this.zitStore.useDockerSandbox
+    return !!this.workspace?.useDockerSandbox
   }
 
   get mountClaudeDir (): boolean {
-    return !!this.zitStore.mountClaudeDir
+    return !!this.workspace?.mountClaudeDir
   }
 
   get skipPermissions (): boolean {
-    return !!this.zitStore.dangerouslySkipPermissions
+    return !!this.workspace?.dangerouslySkipPermissions
   }
 
   toggleDockerSandbox (checked: boolean): void {
-    this.zitStore.useDockerSandbox = checked
+    const patch: any = { useDockerSandbox: checked }
     if (!checked && this.mountClaudeDir) {
-      this.zitStore.mountClaudeDir = false
+      patch.mountClaudeDir = false
     }
-    this.cfg.save()
+    this.workspaces.updateWorkspace(this.workspaceId, patch)
+    this.loadWorkspace()
   }
 
   toggleMountClaude (checked: boolean): void {
-    this.zitStore.mountClaudeDir = checked
-    this.cfg.save()
+    this.workspaces.updateWorkspace(this.workspaceId, { mountClaudeDir: checked })
+    this.loadWorkspace()
   }
 
   toggleSkipPermissions (checked: boolean): void {
-    this.zitStore.dangerouslySkipPermissions = checked
-    this.cfg.save()
+    this.workspaces.updateWorkspace(this.workspaceId, { dangerouslySkipPermissions: checked })
+    this.loadWorkspace()
   }
 
   get sandboxChkColor (): string {
@@ -529,6 +538,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   // --- Git branch ---
 
+  private refreshingBranches = false
+
   private refreshBranches (): void {
     const cwd = this.workspace?.cwd
     if (!cwd) {
@@ -536,26 +547,30 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       this.currentBranch = ''
       return
     }
-    try {
-      const result = childProcess.execFileSync('git', ['branch', '--no-color'], { cwd, encoding: 'utf8', timeout: 5000 })
-      const lines = result.split('\n').filter(l => l.trim())
-      const parsed: string[] = []
-      let current = ''
-      for (const line of lines) {
-        const name = line.replace(/^\*?\s+/, '').trim()
-        if (!name) continue
-        parsed.push(name)
-        if (line.startsWith('*')) {
-          current = name
+    if (this.refreshingBranches) return
+    this.refreshingBranches = true
+    childProcess.execFile('git', ['branch', '--no-color'], { cwd, encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
+      this.refreshingBranches = false
+      if (err) {
+        this.branches = []
+        this.currentBranch = ''
+      } else {
+        const lines = (stdout || '').split('\n').filter(l => l.trim())
+        const parsed: string[] = []
+        let current = ''
+        for (const line of lines) {
+          const name = line.replace(/^\*?\s+/, '').trim()
+          if (!name) continue
+          parsed.push(name)
+          if (line.startsWith('*')) {
+            current = name
+          }
         }
+        this.branches = parsed
+        this.currentBranch = current
       }
-      this.branches = parsed
-      this.currentBranch = current
-    } catch {
-      this.branches = []
-      this.currentBranch = ''
-    }
-    try { this.cdr.detectChanges() } catch { }
+      if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
+    })
   }
 
   switchBranch (name: string): void {
@@ -582,18 +597,34 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   // --- Launch command builder ---
 
+  /** On Windows node-pty can't spawn .cmd/.bat directly — wrap in cmd.exe /c */
+  private shellWrap (command: string, args: string[]): { command: string, args: string[] } {
+    if (process.platform === 'win32') {
+      return { command: 'cmd.exe', args: ['/c', command, ...args] }
+    }
+    return { command, args }
+  }
+
   private buildLaunchCommand (claudeArgs: string[]): { command: string, args: string[] } {
     const allArgs = [...claudeArgs, ...this.skipPermsArgs()]
     if (this.useDockerSandbox) {
-      const cwd = this.workspace?.cwd || '.'
-      const dockerArgs = ['sandbox', 'run', '-t', 'docker/sandbox-templates:claude-code']
+      const dockerArgs = ['sandbox', 'run', '--name', 'claude-in-docker-sandbox',
+        '-e', 'FORCE_COLOR=3',
+        '-e', `CLAUDE_CODE_ZIT_SOURCE=tabby`,
+      ]
       if (this.mountClaudeDir) {
-        dockerArgs.push('-v', '~/.claude:/home/agent/.claude')
+        const claudeDir = path.join(os.homedir(), '.claude')
+        dockerArgs.push('-v', `${claudeDir}:/home/agent/.claude`)
+        // Protect settings.json from being overwritten by Claude inside the container
+        const settingsFile = path.join(claudeDir, 'settings.json')
+        if (fsSync.existsSync(settingsFile)) {
+          dockerArgs.push('-v', `${settingsFile}:/home/agent/.claude/settings.json:ro`)
+        }
       }
-      dockerArgs.push('claude', ...allArgs, cwd)
-      return { command: 'docker', args: dockerArgs }
+      dockerArgs.push('claude', ...allArgs)
+      return this.shellWrap('docker', dockerArgs)
     }
-    return { command: 'claude', args: allArgs }
+    return this.shellWrap('claude', allArgs)
   }
 
   trackTerminalId (_: number, t: InternalTerminalSubTab): string {
@@ -779,7 +810,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       if (this.resumeOptions.length) {
         this.resumeOptions = []
         this.selectedResumeSessionId = ''
-        try { this.cdr.detectChanges() } catch { }
+        if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
       }
       return
     }
@@ -851,7 +882,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       selected_session_id: this.selectedResumeSessionId || null,
     })
 
-    try { this.cdr.detectChanges() } catch { }
+    if (this.viewReady) { try { this.cdr.detectChanges() } catch { } }
   }
 
   onResumeSelectionChanged (id: string): void {
@@ -989,6 +1020,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       const baseEnv = { ...(profile?.options?.env ?? {}) }
       const env = {
         ...baseEnv,
+        FORCE_COLOR: '3',
         CLAUDE_CODE_ZIT_SOURCE: 'tabby',
         CLAUDE_CODE_ZIT_TABBY_SESSION: this.debug.sessionId,
         CLAUDE_CODE_ZIT_TERMINAL_ID: terminalId,
@@ -998,6 +1030,12 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         ...(profile?.options ?? {}),
         cwd,
         env,
+      }
+
+      // Direct process launch: replace shell with Claude/Docker executable
+      if (launch?.command) {
+        options.command = launch.command
+        options.args = launch.args ?? []
       }
 
       const profileWithCwd = {
@@ -1045,11 +1083,25 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         }
       })
 
+      this.subscribeUntilDestroyed(tab.destroyed$, () => {
+        const idx = this.terminals.findIndex(x => x.id === terminalId)
+        if (idx < 0) return
+        this.events.markEndedByTerminalId(terminalId, 'process_exited')
+        const wasActive = this.activeTerminalId === terminalId
+        this.terminals.splice(idx, 1)
+        this.syncTerminalRegistry()
+        if (!this.terminals.length) {
+          this.activeTerminalId = null
+        } else if (wasActive) {
+          const next = this.terminals[Math.min(idx, this.terminals.length - 1)]
+          this.activeTerminalId = next?.id ?? null
+        }
+        try { this.cdr.detectChanges() } catch {}
+        this.mountActiveTerminal()
+      })
+
       try { this.cdr.detectChanges() } catch { }
       this.mountActiveTerminal()
-      if (launch?.command) {
-        this.launchCommandInTerminal(tab, launch)
-      }
       this.debug.log('workspace.open_terminal.created', {
         workspace_id: this.workspaceId,
         internal_terminal_id: terminalId,
@@ -1121,59 +1173,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     await this.openWorkspaceTerminal(launch, `resume-${sid.slice(0, 8)}`)
   }
 
-  private launchCommandInTerminal (
-    tab: BaseTabComponent,
-    launch: { command?: string, args?: string[] },
-  ): void {
-    const command = (launch.command ?? '').trim()
-    if (!command) {
-      return
-    }
-    const args = Array.isArray(launch.args) ? launch.args.filter(x => typeof x === 'string' && x.length > 0) : []
-    const line = [command, ...args].join(' ')
-
-    let triesLeft = 30
-    const timer = setInterval(() => {
-      triesLeft--
-      try {
-        const sessionReady = !!(tab as any)?.session
-        if (!sessionReady && triesLeft > 0) {
-          return
-        }
-        clearInterval(timer)
-        this.launchTimers = this.launchTimers.filter(t => t !== timer)
-        if (!sessionReady) {
-          this.debug.log('workspace.launch_command.skipped', {
-            workspace_id: this.workspaceId,
-            reason: 'session_not_ready',
-            line,
-          })
-          return
-        }
-
-        ;(tab as any).sendInput?.(`${line}\r`)
-        this.debug.log('workspace.launch_command.sent', {
-          workspace_id: this.workspaceId,
-          line,
-        })
-      } catch (e: any) {
-        clearInterval(timer)
-        this.launchTimers = this.launchTimers.filter(t => t !== timer)
-        this.debug.log('workspace.launch_command.failed', {
-          workspace_id: this.workspaceId,
-          line,
-          error: String(e?.message ?? e),
-        })
-      }
-    }, 100)
-    this.launchTimers.push(timer)
-  }
-
   override destroy (skipDestroyedEvent?: boolean): void {
-    for (const t of this.launchTimers) {
-      clearInterval(t)
-    }
-    this.launchTimers = []
     this.saveTerminalState()
     this.debug.log('workspace.tab.destroy', {
       workspace_id: this.workspaceId,
@@ -1243,7 +1243,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     // Resume each saved session
     for (const s of saved) {
       this.openWorkspaceTerminal(
-        { command: 'claude', args: ['--resume', s.sessionId] },
+        this.shellWrap('claude', ['--resume', s.sessionId]),
         s.title || `resume-${s.sessionId.slice(0, 8)}`,
       )
     }

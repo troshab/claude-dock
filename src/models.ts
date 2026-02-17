@@ -1,6 +1,5 @@
-export type ViewMode = 'flat' | 'grouped'
 export type SortPreset = 'status' | 'startAsc' | 'startDesc' | 'lastActivityDesc'
-export type GroupSortPreset = 'waiting' | 'path'
+export type GroupSortPreset = 'waiting' | 'path' | 'none'
 
 export interface Workspace {
   id: string
@@ -9,6 +8,9 @@ export interface Workspace {
   profileId?: string
   sortOrder?: number
   lastActiveTs?: number
+  useDockerSandbox?: boolean
+  mountClaudeDir?: boolean
+  dangerouslySkipPermissions?: boolean
 }
 
 export type SessionStatus = 'working' | 'waiting' | 'ended' | 'unknown'

@@ -2,10 +2,11 @@ import { NgModule } from '@angular/core'
 import { CommonModule } from '@angular/common'
 
 import { Injectable } from '@angular/core'
-import TabbyCorePlugin, { AppService, BaseTabComponent, ConfigProvider, CommandProvider, ConfigService, HostWindowService, MenuItemOptions, PlatformService, TabContextMenuItemProvider, TabsService } from 'tabby-core'
+import TabbyCorePlugin, { AppService, BaseTabComponent, ConfigProvider, CommandProvider, ConfigService, HostWindowService, MenuItemOptions, PlatformService, TabContextMenuItemProvider, TabRecoveryProvider, TabsService } from 'tabby-core'
 
 import { ClaudeCodeZitConfigProvider } from './config'
 import { ClaudeCodeZitCommandProvider } from './commands'
+import { ClaudeCodeZitRecoveryProvider } from './recoveryProvider'
 
 import { DashboardTabComponent } from './components/dashboardTab.component'
 import { WorkspaceTabComponent } from './components/workspaceTab.component'
@@ -35,6 +36,7 @@ class CzContextMenuSentinel extends TabContextMenuItemProvider {
     { provide: ConfigProvider, useClass: ClaudeCodeZitConfigProvider, multi: true },
     { provide: CommandProvider, useClass: ClaudeCodeZitCommandProvider, multi: true },
     { provide: TabContextMenuItemProvider, useClass: CzContextMenuSentinel, multi: true },
+    { provide: TabRecoveryProvider, useClass: ClaudeCodeZitRecoveryProvider, multi: true },
   ],
   declarations: [
     DashboardTabComponent,

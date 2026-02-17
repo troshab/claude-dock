@@ -169,6 +169,18 @@ declare module 'tabby-core' {
     commandLabel?: string
   }
 
+  export interface RecoveryToken {
+    [_: string]: any
+    type: string
+    tabIcon?: string | null
+    tabColor?: string | null
+  }
+
+  export abstract class TabRecoveryProvider<T extends BaseTabComponent = BaseTabComponent> {
+    abstract applicableTo(recoveryToken: RecoveryToken): Promise<boolean>
+    abstract recover(recoveryToken: RecoveryToken): Promise<any>
+  }
+
   export abstract class TabContextMenuItemProvider {
     weight: number
     abstract getItems(tab: BaseTabComponent, tabHeader?: boolean): Promise<MenuItemOptions[]>

@@ -150,6 +150,12 @@ Both component templates (DashboardTab, WorkspaceTab) use semantic HTML and ARIA
   Never use hardcoded hex/rgba values — always reference the token.
 - **Display name**: the plugin is titled "Claude Dock" in the UI.
 
+## Debug screenshots
+
+Save debug screenshots (layout issues, UI bugs, responsive testing) to `.screenshots/`.
+This directory is gitignored. Use descriptive filenames, e.g. `overlap-bug-dashboard.png`,
+`v5-narrow-450.png`. When taking screenshots via MCP `take_screenshot`, save them there.
+
 ## Development — Tabby remote debugging
 
 To inspect the plugin live in Chrome DevTools (or via MCP debug-in-chrome-with-devtools),

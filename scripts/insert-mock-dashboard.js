@@ -198,17 +198,18 @@ async function main () {
         if (!cmp?.recompute) return 'no component';
 
         const projects = [];
+        const home = require('os').homedir().replace(/\\\\/g, '/');
         const bases = [
-          '/c/Users/tro/claude-dock',
-          '/c/Users/tro/projects/web-app',
-          '/c/Users/tro/projects/api-server',
-          '/c/Users/tro/work/dashboard',
-          '/c/Users/tro/experiments/ml-pipeline',
-          '/c/Users/tro/freelance/client-portal',
-          '/c/Users/tro/oss/react-components',
-          '/c/Users/tro/tools/cli-utils',
-          '/c/Users/tro/research/llm-bench',
-          '/c/Users/tro/infra/deploy-scripts',
+          home + '/claude-dock',
+          home + '/projects/web-app',
+          home + '/projects/api-server',
+          home + '/work/dashboard',
+          home + '/experiments/ml-pipeline',
+          home + '/freelance/client-portal',
+          home + '/oss/react-components',
+          home + '/tools/cli-utils',
+          home + '/research/llm-bench',
+          home + '/infra/deploy-scripts',
         ];
         for (let i = 0; i < ${projectCount}; i++) {
           projects.push(bases[i % bases.length]);

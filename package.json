@@ -1,6 +1,6 @@
 {
   "name": "@troshab/claude-dock",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Pinned Claude Code dashboard + workspace tabs for Tabby",
   "main": "dist/index.js",
   "scripts": {
@@ -20,7 +20,7 @@
     "description": "Pinned Claude Code dashboard + workspace tabs"
   },
   "author": "tro",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "commonjs",
   "files": [
     "dist",

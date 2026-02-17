@@ -32,7 +32,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
           <div class="cd-docker-image-label">Docker Sandbox Image:</div>
           <input class="cd-docker-image-input" type="text" aria-label="Default Docker image"
             [value]="defaultDockerImage"
-            [placeholder]="'ghcr.io/troshab/claude-dock:0.1.0'"
+            [placeholder]="'ghcr.io/troshab/claude-dock:1.0.0'"
             (change)="setDefaultDockerImage($any($event.target).value)"
             (blur)="setDefaultDockerImage($any($event.target).value)">
         </div>
@@ -970,7 +970,7 @@ export class DashboardTabComponent extends BaseTabComponent {
   }
 
   get defaultDockerImage (): string {
-    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:0.1.0'
+    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:1.0.0'
   }
 
   setDefaultDockerImage (value: string): void {
@@ -978,7 +978,7 @@ export class DashboardTabComponent extends BaseTabComponent {
     if (!store) return
     store.claudeDock ??= {}
     const trimmed = value.trim()
-    store.claudeDock.defaultDockerImage = trimmed || 'ghcr.io/troshab/claude-dock:0.1.0'
+    store.claudeDock.defaultDockerImage = trimmed || 'ghcr.io/troshab/claude-dock:1.0.0'
     this.cfg.save()
   }
 

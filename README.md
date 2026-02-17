@@ -5,7 +5,7 @@ Tabby plugin that adds:
 - Pinned **Claude Dock Dashboard** tab (singleton).
 - **Workspace** tabs (one per project directory).
 - Per-workspace **terminal sub-tabs** (opened with `cwd = workspace.cwd`).
-- Claude Code **sessions list** (working/waiting) driven by Claude hooks writing `events.jsonl`.
+- Claude Code **sessions list** (working/waiting) driven by Claude hooks (realtime via named pipe/TCP).
 - Claude **usage** panel (reads `~/.claude/stats-cache.json`).
 
 ## Install
@@ -25,5 +25,6 @@ Restart Tabby to activate.
   - `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`, `SessionEnd`
 - Links the Tabby plugin into `<tabby-plugins>/node_modules/tabby-claude-dock`
 
-Events are appended to `~/.claude/claude-dock/events.jsonl`.
+Events are delivered in realtime via named pipe (Windows) or unix socket (Linux/Mac).
+Docker containers send events via TCP to `host.docker.internal:19542`.
 

@@ -1,3 +1,25 @@
+## Versioning
+
+Semantic versioning: `MAJOR.MINOR.PATCH`.
+
+- **Patch** (1.0.0 -> 1.0.1 -> ... -> 1.0.9): bug fixes, small tweaks, no new features.
+- **Minor** (1.0.9 -> 1.1.0): new features, non-breaking changes.
+- **Major** (1.x.y -> 2.0.0): breaking changes (config format, hook protocol, API).
+
+Version is pinned in these locations (all must be updated together):
+- `package.json` `version`
+- `plugin/.claude-plugin/plugin.json` `version`
+- `src/config.ts` `defaultDockerImage` tag
+- `src/components/dashboardTab.component.ts` image placeholder and fallback
+- `src/components/workspaceTab.component.ts` image fallback
+
+Docker image tag matches the package version: `ghcr.io/troshab/claude-dock:1.0.0`.
+GitHub Actions workflow (`.github/workflows/docker.yml`) builds and pushes to ghcr.io
+on git tags matching `v*` (e.g., `git tag v1.0.0 && git push --tags`).
+
+After bumping version, run `npm install --package-lock-only` to sync package-lock.json,
+then the install script will deploy the hook to `~/.claude/plugins/cache/claude-dock/dock/<version>/`.
+
 ## Known issues — embedded terminals
 
 Workspace tabs embed Tabby terminal tabs via `insertIntoContainer`. Keyboard focus can

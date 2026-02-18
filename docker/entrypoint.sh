@@ -8,8 +8,10 @@ set -e
 #    resolve inside the container (/DRIVE/Users/NAME/.claude -> /home/agent/.claude).
 # 2. Fix dangling symlinks left by docker sandbox run (settings.json, .claude.json).
 # 3. Remove .orphaned_at markers that Claude Code writes on first start.
-# 4. Forward host ports to container localhost via socat.
-# 5. Exec into the requested command (claude / bash / ...).
+# 4. Copy SSH keys and gitconfig from staging mounts with fixed permissions.
+# 5. Configure git safe.directory for cross-UID bind mounts.
+# 6. Forward host ports to container localhost via socat.
+# 7. Exec into the requested command (claude / bash / ...).
 # ---------------------------------------------------------------------------
 
 CLAUDE_HOME="/home/agent/.claude"
@@ -62,7 +64,47 @@ done
 # --- 3. Clean orphan markers ---------------------------------------------------
 find "$CLAUDE_HOME/plugins/cache" -name ".orphaned_at" -delete 2>/dev/null || true
 
-# --- 4. Port forwarding --------------------------------------------------------
+# --- 4. SSH keys: copy from staging mount with fixed permissions ---------------
+# Host mounts ~/.ssh as /tmp/.ssh-host:ro (Windows bind mounts produce 777 perms
+# which ssh rejects). Copy to /home/agent/.ssh with correct ownership and modes.
+if [ -d /tmp/.ssh-host ]; then
+  mkdir -p "$HOME/.ssh"
+  cp -a /tmp/.ssh-host/. "$HOME/.ssh/" 2>/dev/null || true
+  chown -R "$(id -u):$(id -g)" "$HOME/.ssh" 2>/dev/null || true
+  chmod 700 "$HOME/.ssh"
+  chmod 600 "$HOME/.ssh"/* 2>/dev/null || true
+  chmod 644 "$HOME/.ssh"/*.pub 2>/dev/null || true
+  chmod 644 "$HOME/.ssh"/known_hosts* 2>/dev/null || true
+  chmod 644 "$HOME/.ssh"/config 2>/dev/null || true
+fi
+
+# --- 5. Git config: copy from staging mount, clean up, set safe.directory ------
+# Host mounts ~/.gitconfig as /tmp/.gitconfig-host:ro.
+if [ -f /tmp/.gitconfig-host ]; then
+  cp /tmp/.gitconfig-host "$HOME/.gitconfig" 2>/dev/null || true
+  # Remove Windows-specific settings that don't work inside the container.
+  git config --global --unset core.editor 2>/dev/null || true
+  git config --global --unset credential.helper 2>/dev/null || true
+fi
+# Allow git to work with cross-UID bind mounts (host UID != container UID).
+git config --global --add safe.directory '*' 2>/dev/null || true
+
+# If GH_TOKEN is set, configure gh as git credential helper (HTTPS auth)
+# and pull user.name/email from GitHub API if not already in gitconfig.
+if [ -n "$GH_TOKEN" ]; then
+  gh auth setup-git 2>/dev/null || true
+  if ! git config --global user.name &>/dev/null || ! git config --global user.email &>/dev/null; then
+    _gh_user=$(gh api /user --jq '.name // .login' 2>/dev/null || true)
+    _gh_email=$(gh api /user --jq '.email // empty' 2>/dev/null || true)
+    if [ -z "$_gh_email" ]; then
+      _gh_email=$(gh api /user/emails --jq '[.[] | select(.primary)] | .[0].email // empty' 2>/dev/null || true)
+    fi
+    [ -n "$_gh_user" ] && git config --global user.name "$_gh_user" 2>/dev/null || true
+    [ -n "$_gh_email" ] && git config --global user.email "$_gh_email" 2>/dev/null || true
+  fi
+fi
+
+# --- 6. Port forwarding --------------------------------------------------------
 # CLAUDE_DOCK_FORWARD_PORTS is a comma-separated list of ports (e.g. "3000,5173,8080").
 # Each port gets a socat background process forwarding container localhost -> host.
 if [ -n "$CLAUDE_DOCK_FORWARD_PORTS" ]; then
@@ -75,5 +117,5 @@ if [ -n "$CLAUDE_DOCK_FORWARD_PORTS" ]; then
   done
 fi
 
-# --- 5. Exec into main command -------------------------------------------------
+# --- 7. Exec into main command -------------------------------------------------
 exec "$@"

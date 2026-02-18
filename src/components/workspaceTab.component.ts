@@ -89,6 +89,13 @@ interface ResumeCandidate {
           </select>)
         </span>
         <span class="cd-ws-no-git" *ngIf="!currentBranch">(No Git Repo)</span>
+        <label class="cd-ws-chk" [ngClass]="permsChkColor">
+          <input type="checkbox" [checked]="skipPermissions"
+            (change)="toggleSkipPermissions($any($event.target).checked)">
+          <span>Dangerously skip permissions</span>
+        </label>
+      </div>
+      <div class="cd-ws-info-row cd-ws-docker-row" *ngIf="workspace?.cwd">
         <label class="cd-ws-chk" [ngClass]="sandboxChkColor">
           <input type="checkbox" [checked]="useDockerSandbox"
             (change)="toggleDockerSandbox($any($event.target).checked)">
@@ -104,13 +111,17 @@ interface ResumeCandidate {
             (change)="toggleMountClaude($any($event.target).checked)">
           <span>Mount ~/.claude</span>
         </label>
-        <span class="cd-ws-hint" *ngIf="useDockerSandbox">~/.ssh + ~/.gitconfig auto-mounted (ro)</span>
-        <label class="cd-ws-chk" [ngClass]="permsChkColor">
-          <input type="checkbox" [checked]="skipPermissions"
-            (change)="toggleSkipPermissions($any($event.target).checked)">
-          <span>Dangerously skip permissions</span>
-        </label>
-        <span class="cd-ws-ports" [class.cd-ws-ports-disabled]="!useDockerSandbox" *ngIf="forwardPorts.length || useDockerSandbox">
+        <select class="form-control form-control-sm cd-git-select" aria-label="Git passthrough"
+          [ngClass]="gitSelectColor" [disabled]="!useDockerSandbox"
+          [value]="gitPassthrough"
+          (change)="onGitPassthroughChanged($any($event.target).value)">
+          <option value="none">No Git Passthrough</option>
+          <option value="gh-token">GH Token Passthrough</option>
+          <option value="ssh-mount">Mount ~/.ssh for git</option>
+        </select>
+      </div>
+      <div class="cd-ws-info-row" *ngIf="workspace?.cwd && (forwardPorts.length || useDockerSandbox)">
+        <span class="cd-ws-ports" [class.cd-ws-ports-disabled]="!useDockerSandbox">
           <span class="cd-ws-ports-label">Ports forwarded to Docker's localhost:</span>
           <span class="cd-port-tag" *ngFor="let p of forwardPorts">
             {{ p }}<button class="cd-port-rm" [disabled]="!useDockerSandbox" (click)="removePort(p)">&times;</button>
@@ -230,6 +241,11 @@ interface ResumeCandidate {
     .cd-port-input::placeholder { opacity: .4; }
     .cd-port-hook { opacity: .35; font-size: 0.8em; font-style: italic; white-space: nowrap; }
     .cd-ws-hint { opacity: .4; font-size: 0.8em; font-style: italic; white-space: nowrap; }
+    .cd-git-select { width: auto; display: inline-block; font-size: 0.85em; font-weight: 600; padding: var(--cd-gap-micro) var(--cd-gap-xs); }
+    .cd-git-select option { background: var(--cd-option-bg); color: var(--cd-option-text); }
+    .cd-git-select:disabled { opacity: .35; }
+    .cd-git-select-orange { color: var(--cd-orange); border-color: var(--cd-orange); }
+    .cd-git-select-red { color: var(--cd-red); border-color: var(--cd-red); }
     .cd-ws-image-input {
       width: 260px; max-width: 100%; padding: var(--cd-gap-micro) var(--cd-gap-xs);
       background: transparent; border: 1px solid var(--cd-border-light);
@@ -603,6 +619,24 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     this.loadWorkspace()
   }
 
+  get gitPassthrough (): string {
+    return this.workspace?.gitPassthrough || 'none'
+  }
+
+  get gitSelectColor (): string {
+    if (!this.useDockerSandbox) return ''
+    switch (this.gitPassthrough) {
+      case 'gh-token': return 'cd-git-select-orange'
+      case 'ssh-mount': return 'cd-git-select-red'
+      default: return ''
+    }
+  }
+
+  onGitPassthroughChanged (value: string): void {
+    this.workspaces.updateWorkspace(this.workspaceId, { gitPassthrough: value as any })
+    this.loadWorkspace()
+  }
+
   toggleSkipPermissions (checked: boolean): void {
     this.workspaces.updateWorkspace(this.workspaceId, { dangerouslySkipPermissions: checked })
     this.loadWorkspace()
@@ -791,11 +825,30 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         dockerArgs.push('-v', `${tmpProjects}:/home/agent/.claude/projects`)
       }
 
-      // Git: mount SSH keys and gitconfig so git works inside the container.
-      const sshDir = path.join(home, '.ssh')
-      const gitconfigFile = path.join(home, '.gitconfig')
-      try { if (fsSync.statSync(sshDir).isDirectory()) dockerArgs.push('-v', `${sshDir}:/home/agent/.ssh:ro`) } catch {}
-      try { if (fsSync.statSync(gitconfigFile).isFile()) dockerArgs.push('-v', `${gitconfigFile}:/home/agent/.gitconfig:ro`) } catch {}
+      // Git passthrough: none / gh-token / ssh-mount.
+      const gitMode = this.gitPassthrough
+      if (gitMode === 'gh-token' || gitMode === 'ssh-mount') {
+        // Always mount gitconfig for user.name/email (entrypoint strips Windows-only keys).
+        const gitconfigFile = path.join(home, '.gitconfig')
+        try { if (fsSync.statSync(gitconfigFile).isFile()) dockerArgs.push('-v', `${gitconfigFile}:/tmp/.gitconfig-host:ro`) } catch {}
+      }
+      if (gitMode === 'gh-token') {
+        // Extract GH token from host keyring → gh CLI + git HTTPS auth inside container.
+        try {
+          const ghToken = await new Promise<string>((resolve) => {
+            const { exec: execCmd } = require('child_process')
+            execCmd('gh auth token', { timeout: 5000 }, (err: any, stdout: string) => {
+              resolve(err ? '' : (stdout || '').trim())
+            })
+          })
+          if (ghToken) dockerArgs.push('-e', `GH_TOKEN=${ghToken}`)
+        } catch {}
+      }
+      if (gitMode === 'ssh-mount') {
+        // Mount SSH keys to staging dir (entrypoint copies with fixed perms).
+        const sshDir = path.join(home, '.ssh')
+        try { if (fsSync.statSync(sshDir).isDirectory()) dockerArgs.push('-v', `${sshDir}:/tmp/.ssh-host:ro`) } catch {}
+      }
 
       dockerArgs.push(this.effectiveDockerImage, 'claude', ...allArgs)
 

@@ -12,6 +12,8 @@ export interface Workspace {
   /** Custom Docker image for this workspace. Falls back to global default if empty. */
   dockerImage?: string
   mountClaudeDir?: boolean
+  /** Git auth passthrough: 'none' | 'gh-token' | 'ssh-mount'. Default: 'none'. */
+  gitPassthrough?: 'none' | 'gh-token' | 'ssh-mount'
   dangerouslySkipPermissions?: boolean
   /** Ports to forward from container localhost to host (via socat). */
   forwardPorts?: number[]

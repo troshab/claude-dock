@@ -1,5 +1,9 @@
 # Claude Dock
 
+[![npm](https://img.shields.io/npm/v/@troshab/claude-dock)](https://www.npmjs.com/package/@troshab/claude-dock)
+[![Docker](https://github.com/troshab/claude-dock/actions/workflows/docker.yml/badge.svg)](https://github.com/troshab/claude-dock/actions/workflows/docker.yml)
+[![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-blue)](LICENSE)
+
 [Tabby](https://github.com/Eugeny/tabby) plugin that adds:
 
 - Pinned **Claude Dock Dashboard** tab (singleton).
@@ -21,16 +25,17 @@
 npm i -g @troshab/claude-dock
 ```
 
-This builds the plugin, deploys Claude Code hooks, and links into Tabby.
+This does everything in one step:
+- Installs Claude Code hooks plugin to `~/.claude/plugins/cache/`
+- Registers `claude-dock` in Claude Code `enabledPlugins`
+- Links the Tabby plugin into Tabby's plugin directory
 
 3. Restart Tabby to activate.
 
-## What the install does
+## Uninstall
 
-- Copies `bin/claude-dock-hook.js` to `~/.claude/plugins/cache/claude-dock/`
-- Patches `~/.claude/settings.json` (creates a timestamped `.bak-*` backup) with hooks:
-  - `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`, `SessionEnd`
-- Links the Tabby plugin into `<tabby-plugins>/node_modules/tabby-claude-dock`
+```bash
+npm rm -g @troshab/claude-dock
+```
 
-Events are delivered in realtime via TCP to `127.0.0.1:19542`.
-Docker containers send events to `host.docker.internal:19542`.
+Removes hooks, plugin registration, and Tabby link.

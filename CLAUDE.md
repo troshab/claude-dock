@@ -14,13 +14,29 @@ Version is pinned in these locations (all must be updated together):
 - `src/components/dashboardTab.component.ts` image placeholder and fallback
 - `src/components/workspaceTab.component.ts` image fallback
 
-Docker image tag matches the package version: `ghcr.io/troshab/claude-dock:1.0.0`.
+Docker image tag matches the package version: `ghcr.io/troshab/claude-dock:<version>`.
 GitHub Actions workflow (`.github/workflows/docker.yml`) builds and pushes to ghcr.io
-on git tags matching `v*` (e.g., `git tag v1.0.0 && git push --tags`).
+on git tags matching `v*`.
 
-After bumping version, run `npm install --package-lock-only` to sync package-lock.json.
-The Claude Code plugin is installed via marketplace: `claude plugin install --from github.com/troshab/claude-dock`
-(deploys to `~/.claude/plugins/cache/claude-dock/claude-dock/<version>/`).
+### Release checklist
+
+1. Bump version in all 6 locations listed above (search-replace old -> new).
+2. `npm install --package-lock-only` to sync package-lock.json.
+3. Commit, push.
+4. `git tag v<version> && git push --tags` -- triggers Docker image build on ghcr.io.
+5. `npm publish --access public` -- publishes to npm (requires OTP confirmation).
+
+### Distribution
+
+Everything is installed by a single command: `npm i -g @troshab/claude-dock`.
+The postinstall script (`scripts/install.js`) does three things:
+1. Copies `plugin/` to `~/.claude/plugins/cache/claude-dock/claude-dock/<version>/`
+   (Claude Code hooks -- delivered via plugin/hooks/hooks.json).
+2. Registers `claude-dock@claude-dock` in `~/.claude/settings.json` `enabledPlugins`.
+3. Links the Tabby plugin into `<tabby-plugins>/node_modules/tabby-claude-dock`.
+
+No separate marketplace command is needed. `npm uninstall -g @troshab/claude-dock`
+runs `scripts/uninstall.js` which reverses all three steps.
 
 ## Known issues — embedded terminals
 
@@ -417,6 +433,6 @@ powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContin
 ## Plugin system — orphaning and enabledPlugins
 
 Claude Code orphans plugins in `~/.claude/plugins/cache/` that are not listed in
-`settings.json` `enabledPlugins`. Marketplace install (`claude plugin install --from ...`)
-registers the key `claude-dock@claude-dock` in `enabledPlugins` automatically.
+`settings.json` `enabledPlugins`. The npm postinstall script registers
+`claude-dock@claude-dock` in `enabledPlugins` and copies plugin files to the cache.
 The Docker entrypoint removes `.orphaned_at` markers on startup as a safety net.

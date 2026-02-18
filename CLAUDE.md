@@ -303,6 +303,56 @@ Both component templates (DashboardTab, WorkspaceTab) use semantic HTML and ARIA
   Completed: outlined circle (very dim) + strikethrough text.
 - **Display name**: the plugin is titled "Claude Dock" in the UI.
 
+## Hook processing — bidirectional TCP protocol
+
+Claude Code fires 14 hook events during a session lifecycle. Our plugin handles all of them
+via a TCP server on port 19542. Hooks fall into two categories:
+
+**Async (fire-and-forget via dispatcher->worker):** SessionStart, UserPromptSubmit,
+PreToolUse, PostToolUse, PostToolUseFailure, Notification, SubagentStart, PreCompact,
+SessionEnd. These update dashboard session state (status, activity, errors, todos) but
+don't return decisions to Claude Code.
+
+**Sync (bidirectional TCP, socket held open):** PermissionRequest, Stop, SubagentStop,
+TeammateIdle, TaskCompleted. These hold the TCP socket open so the dashboard can send a
+response back to the hook process, which then writes the decision to stdout/stderr.
+
+### Sync hook response protocol
+
+Hook sends JSON with `awaiting_response: true` + `request_id` (UUID). Tabby stores the
+socket in `pendingPermissions` Map keyed by `request_id`. Dashboard shows interactive
+buttons. User clicks -> Tabby writes response JSON to socket -> hook formats output:
+
+| Hook | Dashboard UI | Allow response | Block response |
+|------|-------------|----------------|----------------|
+| PermissionRequest | Allow/Deny buttons | stdout: `{decision:{behavior:"allow"}}` | stdout: `{decision:{behavior:"deny",message:"..."}}` |
+| Stop | Continue + text input | exit 0, no stdout | stdout: `{decision:"block",reason:"..."}` |
+| SubagentStop | Continue button | exit 0, no stdout | stdout: `{decision:"block",reason:"..."}` |
+| TeammateIdle | Continue button | exit 0 | exit 2, stderr: message |
+| TaskCompleted | Accept/Reject + text | exit 0 | exit 2, stderr: message |
+
+### Dashboard-active optimization
+
+Non-essential sync hooks (Stop, SubagentStop, TeammateIdle, TaskCompleted) auto-resolve
+with `behavior: "allow"` when the dashboard tab is not focused (`dashboardActive` flag).
+This prevents 30-second blocking delays when the user is working in the terminal.
+PermissionRequest always holds regardless of dashboard state (600s timeout).
+
+### AskUserQuestion
+
+AskUserQuestion is a tool, not a hook event. It triggers PermissionRequest (known bug
+[#15400](https://github.com/anthropics/claude-code/issues/15400)). The dashboard shows
+the question text and options in the permission card via `buildActivityString`. The user
+can Allow/Deny but cannot select an answer option (no API support yet).
+
+### Key files
+
+- `bin/claude-dock-hook.js`: `SYNC_HOOKS` config, `runSyncHook()`, `formatSyncResponse()`
+- `src/services/claudeEvents.service.ts`: `pendingPermissions` Map, `respondToHookAction()`,
+  `clearPendingForSession()`, `dashboardActive` flag
+- `src/components/dashboardTab.component.ts`: `.cd-action-card` UI, action methods
+- `plugin/hooks/hooks.json`: sync hooks have no `"async": true`
+
 ## Debug screenshots
 
 Save debug screenshots (layout issues, UI bugs, responsive testing) to `.screenshots/`.

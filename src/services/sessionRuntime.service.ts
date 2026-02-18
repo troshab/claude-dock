@@ -11,6 +11,11 @@ import { TabbyDebugService } from './tabbyDebug.service'
 
 const execFileAsync = promisify(execFile)
 
+/** Full path to Windows PowerShell 5.1 (avoids EFTYPE when spawning bare "powershell" from Electron+MSYS). */
+const POWERSHELL_EXE = process.platform === 'win32'
+  ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+  : 'powershell'
+
 export interface SessionRuntimeStat {
   pid: number
   processName?: string
@@ -52,6 +57,7 @@ export class SessionRuntimeService {
 
   // Docker container tracking — virtual (negative) PIDs
   private trackedContainers = new Map<string, number>()  // name -> virtualPid
+  private terminalToContainer = new Map<string, string>()  // terminalId -> containerName
   private nextVirtualPid = -1
 
   constructor (injector: Injector) {
@@ -113,7 +119,7 @@ export class SessionRuntimeService {
 
     const script = `$ids = @(${safeIds.join(',')}); Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id, CPU, WorkingSet64, ProcessName | ConvertTo-Json -Depth 4 -Compress`
 
-    const result = await execFileAsync('powershell', ['-NoProfile', '-Command', script], {
+    const result = await execFileAsync(POWERSHELL_EXE, ['-NoProfile', '-Command', script], {
       windowsHide: true,
       maxBuffer: 1024 * 1024,
     }).catch((e: any) => {
@@ -327,12 +333,16 @@ export class SessionRuntimeService {
 
   // --- Docker container tracking ---
 
-  trackContainer (name: string): number {
+  trackContainer (name: string, terminalId?: string): number {
     const existing = this.trackedContainers.get(name)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) {
+      if (terminalId) this.terminalToContainer.set(terminalId, name)
+      return existing
+    }
     const vPid = this.nextVirtualPid--
     this.trackedContainers.set(name, vPid)
-    this.debug.log('runtime.container.track', { name, virtual_pid: vPid })
+    if (terminalId) this.terminalToContainer.set(terminalId, name)
+    this.debug.log('runtime.container.track', { name, virtual_pid: vPid, terminal_id: terminalId ?? null })
     return vPid
   }
 
@@ -340,6 +350,10 @@ export class SessionRuntimeService {
     const vPid = this.trackedContainers.get(name)
     if (vPid === undefined) return
     this.trackedContainers.delete(name)
+    // Clean up terminal mapping
+    for (const [tid, cn] of this.terminalToContainer.entries()) {
+      if (cn === name) this.terminalToContainer.delete(tid)
+    }
     // Remove stale stat entry
     const cur = this.stats$.value
     if (cur[vPid]) {
@@ -354,6 +368,13 @@ export class SessionRuntimeService {
     const vPid = this.trackedContainers.get(name)
     if (vPid === undefined) return null
     return this.stats$.value[vPid] ?? null
+  }
+
+  /** Look up container stats by terminal ID (for dashboard use). */
+  getStatByTerminalId (terminalId: string): SessionRuntimeStat | null {
+    const name = this.terminalToContainer.get(terminalId)
+    if (!name) return null
+    return this.getContainerStat(name)
   }
 
   private async readDockerSnapshots (): Promise<Map<string, { cpu: number, mem: number }>> {
@@ -402,7 +423,7 @@ export class SessionRuntimeService {
 
     try {
       if (process.platform === 'win32') {
-        await execFileAsync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${Math.floor(p)} -Force -ErrorAction Stop`], {
+        await execFileAsync(POWERSHELL_EXE, ['-NoProfile', '-Command', `Stop-Process -Id ${Math.floor(p)} -Force -ErrorAction Stop`], {
           windowsHide: true,
           maxBuffer: 1024 * 1024,
         })

@@ -2,50 +2,21 @@ import { Injectable, Injector } from '@angular/core'
 import { BehaviorSubject } from 'rxjs'
 import { AppService, ConfigService, HostWindowService, NotificationsService } from 'tabby-core'
 
-import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import * as crypto from 'crypto'
 import * as net from 'net'
 
 import { ClaudeHookEvent, ClaudeSession } from '../models'
-import { normalizePath, nowMs, safeJsonParse } from '../utils'
+import { normalizePath, nowMs, safeJsonParse, buildActivityString } from '../utils'
 import { TabbyDebugService } from './tabbyDebug.service'
 
-function getEventsPath (): string {
-  return path.join(os.homedir(), '.claude', 'claude-dock', 'events.jsonl')
-}
-
-interface RealtimeEndpoint {
-  kind: 'pipe' | 'unix'
-  path: string
-}
-
 const DOCK_TCP_PORT = 19542
-
-function getRealtimeEndpoint (): RealtimeEndpoint {
-  const baseDir = path.join(os.homedir(), '.claude', 'claude-dock')
-  if (process.platform === 'win32') {
-    const homeKey = os.homedir().toLowerCase()
-    const hash = crypto.createHash('sha1').update(homeKey).digest('hex').slice(0, 10)
-    return {
-      kind: 'pipe',
-      path: `\\\\.\\pipe\\claude-dock-${hash}-events-v1`,
-    }
-  }
-  return {
-    kind: 'unix',
-    path: path.join(baseDir, 'hook-events.sock'),
-  }
-}
 
 type SessionMap = Map<string, ClaudeSession>
 
 @Injectable({ providedIn: 'root' })
 export class ClaudeEventsService {
   readonly sessions$ = new BehaviorSubject<ClaudeSession[]>([])
-  readonly eventsPath = getEventsPath()
-  readonly realtimeEndpoint = getRealtimeEndpoint()
 
   private app: AppService
   private config: ConfigService
@@ -54,18 +25,18 @@ export class ClaudeEventsService {
   private debug: TabbyDebugService
 
   private sessions: SessionMap = new Map()
-  private offset = 0
-  private partialLine = ''
-  private initialized = false
-  private missingEventsFileLogged = false
   private lastTrimDebugSig = ''
-  private timer?: any
-  private realtimeServer?: net.Server
   private tcpServer?: net.Server
   private seenEventIds = new Map<string, number>()
   private lastEventIdSweepTs = 0
   private pendingTitles = new Map<string, { title: string, ts: number }>()
+  private terminalProjectsPath = new Map<string, string>()  // terminalId -> host projects dir
   private suppressNotifications = true
+  private pendingPermissions = new Map<string, { socket: net.Socket, sessionKey: string, ts: number }>()
+  private dashboardActive = false
+
+  /** Non-essential sync hooks (stop, subagent_stop, etc.) auto-resolve when dashboard is inactive. */
+  private static readonly OPTIONAL_SYNC_EVENTS = new Set(['subagent_stop', 'teammate_idle', 'task_completed'])
 
   constructor (injector: Injector) {
     this.app = injector.get(AppService)
@@ -77,54 +48,8 @@ export class ClaudeEventsService {
   }
 
   private start (): void {
-    this.startRealtimeServer().catch(() => null)
     this.startTcpServer()
-
-    const pollMs = 1000
-    this.debug.log('events.polling.start', {
-      events_path: this.eventsPath,
-      poll_ms: pollMs,
-    })
-    // Polling is simpler than fs.watch across platforms.
-    this.timer = setInterval(() => {
-      this.tick().catch(() => null)
-    }, pollMs)
-    this.tick().catch(() => null)
-  }
-
-  private async startRealtimeServer (): Promise<void> {
-    const endpoint = this.realtimeEndpoint
-    try {
-      if (endpoint.kind === 'unix') {
-        const dir = path.dirname(endpoint.path)
-        await fs.promises.mkdir(dir, { recursive: true })
-        try {
-          await fs.promises.unlink(endpoint.path)
-        } catch { }
-      }
-    } catch (e: any) {
-      this.debug.log('events.realtime.prepare_failed', {
-        endpoint_kind: endpoint.kind,
-        endpoint_path: endpoint.path,
-        error: String(e?.message ?? e),
-      })
-    }
-
-    this.realtimeServer = net.createServer((socket) => this.handleRealtimeSocket(socket))
-    this.realtimeServer.on('error', (e: any) => {
-      this.debug.log('events.realtime.server_error', {
-        endpoint_kind: endpoint.kind,
-        endpoint_path: endpoint.path,
-        error: String(e?.message ?? e),
-      })
-    })
-
-    this.realtimeServer.listen(endpoint.path, () => {
-      this.debug.log('events.realtime.listening', {
-        endpoint_kind: endpoint.kind,
-        endpoint_path: endpoint.path,
-      })
-    })
+    this.sessions$.next([])
   }
 
   private startTcpServer (): void {
@@ -144,6 +69,7 @@ export class ClaudeEventsService {
 
   private handleRealtimeSocket (socket: net.Socket): void {
     let buffer = ''
+    let heldForPermission = false
     const remote = {
       address: socket.remoteAddress ?? null,
       port: socket.remotePort ?? null,
@@ -162,17 +88,26 @@ export class ClaudeEventsService {
         if (!line) {
           continue
         }
-        this.consumeRealtimeLine(line)
+        const held = this.consumeRealtimeLineWithSocket(line, socket)
+        if (held) {
+          heldForPermission = true
+        }
       }
     })
     socket.on('end', () => {
-      const tail = buffer.trim()
-      if (tail) {
-        this.consumeRealtimeLine(tail)
+      if (!heldForPermission) {
+        const tail = buffer.trim()
+        if (tail) {
+          this.consumeRealtimeLineWithSocket(tail, socket)
+        }
       }
       this.debug.log('events.realtime.client_disconnected', remote)
     })
+    socket.on('close', () => {
+      this.cleanupPermissionSocket(socket)
+    })
     socket.on('error', (e: any) => {
+      this.cleanupPermissionSocket(socket)
       this.debug.log('events.realtime.client_error', {
         ...remote,
         error: String(e?.message ?? e),
@@ -181,12 +116,18 @@ export class ClaudeEventsService {
   }
 
   private consumeRealtimeLine (line: string): void {
+    this.consumeRealtimeLineWithSocket(line, null)
+  }
+
+  /** Parse a realtime JSON line. If the event has awaiting_response + request_id,
+   *  hold the socket open and return true. Otherwise close normally. */
+  private consumeRealtimeLineWithSocket (line: string, socket: net.Socket | null): boolean {
     const evt = safeJsonParse<ClaudeHookEvent>(line)
     if (!evt || typeof evt !== 'object') {
       this.debug.log('events.realtime.invalid_json', {
         line_preview: line.slice(0, 320),
       })
-      return
+      return false
     }
     if (!evt.ts) {
       evt.ts = nowMs()
@@ -194,6 +135,41 @@ export class ClaudeEventsService {
     if (this.consumeEvent(evt, 'realtime')) {
       this.trimAndPublish()
     }
+
+    // Hold socket open for bidirectional hook responses
+    if (socket && evt.awaiting_response && evt.request_id) {
+      const key = this.makeKey(evt)
+      const eventName = (evt.event ?? '').toLowerCase()
+      if (key) {
+        // Non-essential sync hooks: auto-resolve when dashboard is inactive (no delay)
+        if (!this.dashboardActive && ClaudeEventsService.OPTIONAL_SYNC_EVENTS.has(eventName)) {
+          try {
+            socket.write(JSON.stringify({ request_id: evt.request_id, behavior: 'allow' }) + '\n', 'utf8', () => {
+              try { socket.end() } catch {}
+            })
+          } catch {}
+          this.debug.log('events.hook_action.auto_allow', {
+            request_id: evt.request_id,
+            event: eventName,
+            reason: 'dashboard_inactive',
+          })
+          return false
+        }
+        try { socket.setKeepAlive(true, 30000) } catch {}
+        this.pendingPermissions.set(evt.request_id, {
+          socket,
+          sessionKey: key,
+          ts: nowMs(),
+        })
+        this.debug.log('events.hook_action.socket_held', {
+          request_id: evt.request_id,
+          event: eventName,
+          session_key: key,
+        })
+        return true
+      }
+    }
+    return false
   }
 
   private sweepSeenEventIds (now: number): void {
@@ -217,7 +193,7 @@ export class ClaudeEventsService {
     }
   }
 
-  private consumeEvent (evt: ClaudeHookEvent, origin: 'file' | 'realtime'): boolean {
+  private consumeEvent (evt: ClaudeHookEvent, origin = 'realtime'): boolean {
     const eventId = String(evt.event_id ?? '').trim()
     if (eventId) {
       if (this.seenEventIds.has(eventId)) {
@@ -295,6 +271,34 @@ export class ClaudeEventsService {
     }
   }
 
+  /** Register a host-side projects dir for a Docker terminal.
+   *  Used to translate container transcript paths to host paths. */
+  registerTerminalProjectsPath (terminalId: string, hostProjectsDir: string): void {
+    this.terminalProjectsPath.set(terminalId, hostProjectsDir)
+  }
+
+  /** Translate Docker container transcript path to host path. */
+  private containerToHostPath (p: string, terminalId?: string): string {
+    const containerProjectsPrefix = '/home/agent/.claude/projects/'
+    if (!p.startsWith(containerProjectsPrefix)) return p
+    const relPath = p.slice(containerProjectsPrefix.length)
+    // Use terminal-specific host path if registered (temp dir for non-mounted containers)
+    if (terminalId) {
+      const hostDir = this.terminalProjectsPath.get(terminalId)
+      if (hostDir) return path.join(hostDir, relPath)
+    }
+    // Default: full mount maps to ~/.claude/projects/
+    return path.join(os.homedir(), '.claude', 'projects', relPath)
+  }
+
+  /** Derive transcript path: ~/.claude/projects/<dir-name>/<sessionId>.jsonl */
+  private deriveTranscriptPath (sessionId: string, cwd: string): string {
+    // Convert MSYS /c/Users/... to C:/Users/... for consistent dir-name hashing
+    let nativeCwd = cwd.replace(/^\/([a-zA-Z])\//, (_, d: string) => `${d.toUpperCase()}:/`)
+    const dirName = nativeCwd.replace(/[:\\/\.]/g, '-')
+    return path.join(os.homedir(), '.claude', 'projects', dirName, `${sessionId}.jsonl`)
+  }
+
   private normalizeKeyPath (p?: string | null): string {
     let s = normalizePath((p ?? '').trim())
     s = s.replace(/\/+$/g, '')
@@ -363,6 +367,11 @@ export class ClaudeEventsService {
     }
     to.status = to.status !== 'unknown' ? to.status : from.status
     to.lastMessage ??= from.lastMessage
+    to.model ??= from.model
+    to.agentType ??= from.agentType
+    to.lastPrompt ??= from.lastPrompt
+    to.currentActivity ??= from.currentActivity
+    to.permissionMode ??= from.permissionMode
 
     this.sessions.delete(fromKey)
     this.debug.log('events.session.merge', {
@@ -433,13 +442,17 @@ export class ClaudeEventsService {
       s.hostPid = Number(evt.host_pid)
     }
     if (evt.transcript_path) {
-      s.transcriptPath = evt.transcript_path
+      s.transcriptPath = this.containerToHostPath(evt.transcript_path, s.terminalId)
     }
     if (evt.cwd) {
       s.cwd = evt.cwd
     }
     if (evt.title) {
       s.title = evt.title
+    }
+    // Derive transcriptPath from sessionId + cwd when not provided by the hook.
+    if (!s.transcriptPath && s.sessionId && s.cwd) {
+      s.transcriptPath = this.deriveTranscriptPath(s.sessionId, s.cwd)
     }
     return s
   }
@@ -497,6 +510,12 @@ export class ClaudeEventsService {
     if (evt.message) {
       s.lastMessage = evt.message
     }
+    if (evt.hook_type) {
+      s.lastHookType = evt.hook_type
+    }
+    if (evt.permission_mode) {
+      s.permissionMode = evt.permission_mode
+    }
 
     const prevStatus = s.status
 
@@ -506,8 +525,6 @@ export class ClaudeEventsService {
     }
 
     if (event === 'session_start') {
-      // Fresh interactive Claude session is typically idle, waiting for user input.
-      // Show "waiting" immediately instead of "unknown".
       if (s.status !== 'working') {
         s.status = 'waiting'
       }
@@ -515,28 +532,134 @@ export class ClaudeEventsService {
         s.waitingSinceTs = ts
       }
       s.endedTs = undefined
+      // Session metadata
+      if (evt.model) s.model = evt.model
+      if (evt.agent_type) s.agentType = evt.agent_type
     } else if (event === 'tool_start') {
       s.status = 'working'
       s.lastToolTs = ts
       s.lastToolName = evt.tool_name ?? s.lastToolName
       s.waitingSinceTs = undefined
       s.endedTs = undefined
+      this.clearPendingForSession(s.key)
+      this.clearSessionActionFields(s)
+      // Build current activity from tool_name + tool_input
+      const activity = buildActivityString(evt.tool_name, evt.tool_input)
+      if (activity) s.currentActivity = activity
     } else if (event === 'tool_end') {
       s.status = 'working'
       s.lastToolTs = ts
       s.lastToolName = evt.tool_name ?? s.lastToolName
-    } else if (event === 'stop' || event === 'notification') {
+      s.lastFailedTool = undefined
+      s.lastError = undefined
+      s.isInterrupt = undefined
+      if (evt.tool_response) s.lastToolResponse = evt.tool_response
+      // Clear activity on tool completion (agent is thinking)
+      s.currentActivity = undefined
+    } else if (event === 'user_prompt') {
+      s.status = 'working'
+      s.waitingSinceTs = undefined
+      s.endedTs = undefined
+      this.clearPendingForSession(s.key)
+      this.clearSessionActionFields(s)
+      if (evt.prompt) s.lastPrompt = evt.prompt
+      s.currentActivity = undefined  // agent starting to think
+    } else if (event === 'tool_failure') {
+      s.status = 'working'
+      s.lastToolTs = ts
+      s.lastToolName = evt.tool_name ?? s.lastToolName
+      s.lastFailedTool = evt.tool_name ?? s.lastToolName
+      if (evt.error) s.lastError = evt.error
+      if (evt.is_interrupt !== undefined) s.isInterrupt = evt.is_interrupt
+      s.currentActivity = undefined
+    } else if (event === 'permission_request') {
+      s.status = 'waiting'
+      s.permissionPending = evt.tool_name ?? 'unknown'
+      if (!s.waitingSinceTs) {
+        s.waitingSinceTs = ts
+      }
+      // Show what permission is needed
+      const activity = buildActivityString(evt.tool_name, evt.tool_input)
+      if (activity) s.currentActivity = activity
+      // Bidirectional: store request_id so dashboard can show Allow/Deny buttons
+      if (evt.request_id) {
+        s.permissionRequestId = evt.request_id
+        s.permissionDetail = activity || undefined
+      }
+    } else if (event === 'subagent_start') {
+      s.status = 'working'
+      s.waitingSinceTs = undefined
+      s.activeSubagents = (s.activeSubagents ?? 0) + 1
+      if (evt.subagent_type) s.lastSubagentType = evt.subagent_type
+      // Track subagent transcript path for mini-todo extraction
+      if (evt.agent_transcript_path) {
+        if (!s.subagentTranscripts) s.subagentTranscripts = []
+        s.subagentTranscripts.push({
+          type: evt.subagent_type ?? 'unknown',
+          path: evt.agent_transcript_path,
+          agentId: evt.agent_id ?? undefined,
+        })
+      }
+      this.clearPendingForSession(s.key)
+      this.clearSessionActionFields(s)
+    } else if (event === 'subagent_stop') {
+      s.status = 'working'
+      s.activeSubagents = Math.max(0, (s.activeSubagents ?? 0) - 1)
+      if ((s.activeSubagents ?? 0) <= 0) s.lastSubagentType = undefined
+      if (evt.request_id) {
+        s.subagentStopRequestId = evt.request_id
+      }
+    } else if (event === 'stop') {
       s.status = 'waiting'
       if (!s.waitingSinceTs) {
         s.waitingSinceTs = ts
       }
+      s.currentActivity = undefined
+    } else if (event === 'notification') {
+      s.status = 'waiting'
+      if (!s.waitingSinceTs) {
+        s.waitingSinceTs = ts
+      }
+      s.currentActivity = undefined
+    } else if (event === 'task_completed') {
+      s.tasksCompleted = (s.tasksCompleted ?? 0) + 1
+      if (evt.task_subject) s.lastTaskSubject = evt.task_subject
+      if (evt.task_description) s.taskDescription = evt.task_description
+      if (evt.teammate_name) s.teammateName = evt.teammate_name
+      if (evt.team_name) s.teamName = evt.team_name
+      if (evt.request_id) {
+        s.taskCompletedRequestId = evt.request_id
+        s.taskCompletedDetail = evt.task_subject ?? undefined
+      }
+    } else if (event === 'pre_compact') {
+      s.compactCount = (s.compactCount ?? 0) + 1
+      if (evt.trigger) s.compactTrigger = evt.trigger
+    } else if (event === 'teammate_idle') {
+      s.teammateIdle = true
+      if (evt.teammate_name) s.teammateName = evt.teammate_name
+      if (evt.team_name) s.teamName = evt.team_name
+      if (evt.request_id) {
+        s.teammateIdleRequestId = evt.request_id
+      }
     } else if (event === 'session_end') {
       s.status = 'ended'
       s.endedTs = ts
+      if (evt.reason) s.endReason = evt.reason
+      s.currentActivity = undefined
+      this.clearPendingForSession(s.key)
+      this.clearSessionActionFields(s)
     }
 
-    if (!this.suppressNotifications && prevStatus === 'working' && s.status === 'waiting' && s.source === 'tabby') {
-      this.notifyWaiting(s)
+    if (!this.suppressNotifications && s.source === 'tabby') {
+      if (prevStatus === 'working' && s.status === 'waiting') {
+        this.notifyWaiting(s, evt.message)
+      }
+      if (event === 'notification' && evt.message) {
+        this.notifyWaiting(s, evt.message)
+      }
+      if (event === 'permission_request') {
+        this.notifyWaiting(s, evt.tool_name ? `Permission needed: ${evt.tool_name}` : 'Permission needed')
+      }
     }
 
     this.debug.log('events.apply', {
@@ -691,6 +814,90 @@ export class ClaudeEventsService {
     this.suppressNotifications = false
   }
 
+  setDashboardActive (active: boolean): void {
+    this.dashboardActive = active
+  }
+
+  /** Generic method to respond to any bidirectional hook action. */
+  respondToHookAction (requestId: string, behavior: string, message?: string): void {
+    const entry = this.pendingPermissions.get(requestId)
+    if (!entry) {
+      this.debug.log('events.hook_action.respond_not_found', { request_id: requestId })
+      return
+    }
+    const resp = JSON.stringify({ request_id: requestId, behavior, message })
+    try {
+      entry.socket.write(resp + '\n', 'utf8', () => {
+        try { entry.socket.end() } catch {}
+      })
+    } catch (e: any) {
+      this.debug.log('events.hook_action.respond_write_error', {
+        request_id: requestId,
+        error: String(e?.message ?? e),
+      })
+    }
+    this.pendingPermissions.delete(requestId)
+    const s = this.sessions.get(entry.sessionKey)
+    if (s) {
+      this.clearSessionActionFields(s)
+    }
+    this.trimAndPublish()
+    this.debug.log('events.hook_action.responded', {
+      request_id: requestId,
+      behavior,
+      session_key: entry.sessionKey,
+    })
+  }
+
+  /** Kept for API compatibility. */
+  respondToPermission (requestId: string, behavior: 'allow' | 'deny', message?: string): void {
+    this.respondToHookAction(requestId, behavior, message)
+  }
+
+  private clearSessionActionFields (s: ClaudeSession): void {
+    s.permissionPending = undefined
+    s.permissionRequestId = undefined
+    s.permissionDetail = undefined
+    s.subagentStopRequestId = undefined
+    s.teammateIdleRequestId = undefined
+    s.taskCompletedRequestId = undefined
+    s.taskCompletedDetail = undefined
+  }
+
+  /** Close pending sockets for a session (e.g., user responded in CLI or state changed). */
+  private clearPendingForSession (sessionKey: string): void {
+    for (const [requestId, entry] of this.pendingPermissions.entries()) {
+      if (entry.sessionKey !== sessionKey) continue
+      // Send "allow" so the hook exits cleanly
+      try {
+        entry.socket.write(JSON.stringify({ request_id: requestId, behavior: 'allow' }) + '\n', 'utf8', () => {
+          try { entry.socket.end() } catch {}
+        })
+      } catch {}
+      this.pendingPermissions.delete(requestId)
+      this.debug.log('events.hook_action.session_clear', {
+        request_id: requestId,
+        session_key: sessionKey,
+      })
+    }
+  }
+
+  private cleanupPermissionSocket (socket: net.Socket): void {
+    for (const [requestId, entry] of this.pendingPermissions.entries()) {
+      if (entry.socket !== socket) continue
+      this.pendingPermissions.delete(requestId)
+      const s = this.sessions.get(entry.sessionKey)
+      if (s) {
+        this.clearSessionActionFields(s)
+      }
+      this.debug.log('events.hook_action.socket_cleanup', {
+        request_id: requestId,
+        session_key: entry.sessionKey,
+      })
+    }
+    this.trimAndPublish()
+  }
+
   listSessionsForWorkspaceCwd (
     workspaceCwd: string,
     options?: { includeEnded?: boolean, source?: 'tabby' | 'any', limit?: number },
@@ -717,8 +924,8 @@ export class ClaudeEventsService {
     return out.slice(0, limit)
   }
 
-  private notifyWaiting (s: ClaudeSession): void {
-    const title = s.title || (s.cwd ? path.basename(s.cwd) : 'Claude Code')
+  private notifyWaiting (s: ClaudeSession, message?: string | null): void {
+    const sessionTitle = s.title || (s.cwd ? path.basename(s.cwd) : 'Claude Code')
 
     // Check if the session's terminal is currently focused.
     const activeTab = this.app?.activeTab
@@ -730,9 +937,12 @@ export class ClaudeEventsService {
       return
     }
 
+    const notifTitle = message ? `Claude Code: ${sessionTitle}` : `Claude Code -- waiting`
+    const notifBody = message || sessionTitle
+
     try {
       const terminalId = s.terminalId
-      const n = new Notification('Claude Code -- waiting', { body: title })
+      const n = new Notification(notifTitle, { body: notifBody })
       n.addEventListener('click', () => {
         try {
           // 1. Focus the Electron/app window (works on Win/Mac/Linux)
@@ -771,7 +981,8 @@ export class ClaudeEventsService {
     }
 
     this.debug.log('events.notify.waiting', {
-      title,
+      title: notifTitle,
+      body: notifBody,
       session_key: s.key,
       session_id: s.sessionId ?? null,
       cwd: s.cwd ?? null,
@@ -902,107 +1113,4 @@ export class ClaudeEventsService {
     }
   }
 
-  private async tick (): Promise<void> {
-    const file = this.eventsPath
-    let stat: fs.Stats
-    try {
-      stat = await fs.promises.stat(file)
-    } catch {
-      // No file yet.
-      if (!this.missingEventsFileLogged) {
-        this.missingEventsFileLogged = true
-        this.debug.log('events.file.missing', { events_path: file })
-      }
-      if (!this.initialized) {
-        this.initialized = true
-        this.sessions$.next([])
-      }
-      return
-    }
-
-    if (this.missingEventsFileLogged) {
-      this.missingEventsFileLogged = false
-      this.debug.log('events.file.found', {
-        events_path: file,
-        size: stat.size,
-      })
-    }
-
-    if (!this.initialized) {
-      this.initialized = true
-      // Tail the last 1MB on startup to avoid parsing a huge file.
-      const tailBytes = 1024 * 1024
-      this.offset = Math.max(0, stat.size - tailBytes)
-      this.debug.log('events.init.tail', {
-        events_path: file,
-        size: stat.size,
-        offset: this.offset,
-        tail_bytes: tailBytes,
-      })
-    }
-
-    if (stat.size < this.offset) {
-      // Truncated/rotated.
-      this.debug.log('events.file.truncated_or_rotated', {
-        previous_offset: this.offset,
-        next_size: stat.size,
-      })
-      this.offset = 0
-      this.partialLine = ''
-      this.sessions.clear()
-    }
-
-    if (stat.size === this.offset) {
-      this.trimAndPublish()
-      return
-    }
-
-    const len = stat.size - this.offset
-    let fh: fs.promises.FileHandle | null = null
-    try {
-      fh = await fs.promises.open(file, 'r')
-      const buf = Buffer.alloc(len)
-      await fh.read(buf, 0, len, this.offset)
-      this.offset = stat.size
-
-      this.partialLine += buf.toString('utf8')
-      const lines = this.partialLine.split(/\r?\n/g)
-      this.partialLine = lines.pop() ?? ''
-      let parsedCount = 0
-      let invalidCount = 0
-      let duplicateCount = 0
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        const evt = safeJsonParse<ClaudeHookEvent>(trimmed)
-        if (!evt || typeof evt !== 'object') {
-          invalidCount++
-          continue
-        }
-        if (!evt.ts) {
-          evt.ts = nowMs()
-        }
-        if (this.consumeEvent(evt, 'file')) {
-          parsedCount++
-        } else {
-          duplicateCount++
-        }
-      }
-
-      this.debug.log('events.tick.read', {
-        file_size: stat.size,
-        bytes_read: len,
-        lines_count: lines.length,
-        parsed_count: parsedCount,
-        invalid_count: invalidCount,
-        duplicate_count: duplicateCount,
-        offset_after: this.offset,
-      })
-    } finally {
-      await fh?.close()
-    }
-
-    this.trimAndPublish()
-  }
 }

@@ -157,10 +157,18 @@ function registerHooks () {
 
     const hookEvents = {
       SessionStart: 'session_start',
+      UserPromptSubmit: 'user_prompt',
       PreToolUse: 'tool_start',
       PostToolUse: 'tool_end',
+      PostToolUseFailure: 'tool_failure',
+      PermissionRequest: 'permission_request',
+      SubagentStart: 'subagent_start',
+      SubagentStop: 'subagent_stop',
       Stop: 'stop',
       Notification: 'notification',
+      TeammateIdle: 'teammate_idle',
+      TaskCompleted: 'task_completed',
+      PreCompact: 'pre_compact',
       SessionEnd: 'session_end',
     }
 
@@ -186,25 +194,49 @@ function registerHooks () {
       }
     }
 
+    // Events that use synchronous bidirectional hooks (no async, no short timeout)
+    const syncEvents = new Set(['PermissionRequest', 'SubagentStop', 'TeammateIdle', 'TaskCompleted'])
+
     for (const [eventName, eventArg] of Object.entries(hookEvents)) {
       if (!Array.isArray(settings.hooks[eventName])) {
         settings.hooks[eventName] = []
       }
 
       // Check if our hook is already registered
-      const alreadyRegistered = settings.hooks[eventName].some(entry =>
+      const existingIdx = settings.hooks[eventName].findIndex(entry =>
         Array.isArray(entry?.hooks) && entry.hooks.some(h =>
           String(h?.command ?? '').includes('claude-dock-hook')
         )
       )
-      if (alreadyRegistered) continue
+
+      if (existingIdx >= 0) {
+        // Fix existing sync event hooks: remove async/timeout if present
+        if (syncEvents.has(eventName)) {
+          const entry = settings.hooks[eventName][existingIdx]
+          for (const h of (entry?.hooks ?? [])) {
+            if (!String(h?.command ?? '').includes('claude-dock-hook')) continue
+            if (h.async !== undefined || h.timeout !== undefined) {
+              delete h.async
+              delete h.timeout
+              modified = true
+              console.log(`Fixed ${eventName} hook: removed async/timeout for sync mode`)
+            }
+          }
+        }
+        continue
+      }
+
+      const hookEntry = {
+        type: 'command',
+        command: `node "${hookScript}" -- --hook --event ${eventArg}`,
+      }
+      // Async events get a timeout; sync events (PermissionRequest) use default 600s
+      if (!syncEvents.has(eventName)) {
+        hookEntry.timeout = 10000
+      }
 
       settings.hooks[eventName].push({
-        hooks: [{
-          type: 'command',
-          command: `node "${hookScript}" -- --hook --event ${eventArg}`,
-          timeout: 10000,
-        }],
+        hooks: [hookEntry],
       })
       modified = true
     }

@@ -15,7 +15,7 @@ import { SessionRuntimeService } from '../services/sessionRuntime.service'
 import { TabbyDebugService } from '../services/tabbyDebug.service'
 import { WorkspaceTerminalRegistryService } from '../services/workspaceTerminalRegistry.service'
 import { ClaudeSession, SavedTerminal, UsageSummary, Workspace } from '../models'
-import { displayPath, formatAge, normalizePath, safeJsonParse, usageLabel, usagePct } from '../utils'
+import { displayPath, formatAge, nativePath, normalizePath, safeJsonParse, usageLabel, usagePct } from '../utils'
 
 interface InternalTerminalSubTab {
   id: string
@@ -92,7 +92,7 @@ interface ResumeCandidate {
         <label class="cd-ws-chk" [ngClass]="sandboxChkColor">
           <input type="checkbox" [checked]="useDockerSandbox"
             (change)="toggleDockerSandbox($any($event.target).checked)">
-          <span>Docker sandbox</span>
+          <span>Inside Docker</span>
         </label>
         <input class="cd-ws-image-input" type="text" aria-label="Docker image"
           [placeholder]="defaultDockerImage" [value]="workspaceDockerImage"
@@ -256,7 +256,7 @@ interface ResumeCandidate {
     .cd-ws-rt-sep { padding-left: var(--cd-gap-sm); border-left: 1px solid var(--cd-border-light); }
 
     .cd-ws-meters { display: flex; flex-direction: row; gap: var(--cd-gap-sm); flex-shrink: 0; }
-    .cd-ws-meters-row { display: flex; gap: var(--cd-gap-sm); align-items: center; }
+    .cd-ws-meters-row { display: flex; flex-direction: column; gap: var(--cd-gap-micro); }
     .cd-ws-usage-item { display: grid; grid-template-columns: 4ch 60px auto; align-items: center; gap: var(--cd-gap-xs); white-space: nowrap; }
     .cd-ws-usage-label { font-weight: 700; opacity: .7; text-transform: uppercase; }
     .cd-ws-usage-bar {
@@ -680,7 +680,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     }
     if (this.refreshingBranches) return
     this.refreshingBranches = true
-    childProcess.execFile('git', ['branch', '--no-color'], { cwd, encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
+    childProcess.execFile('git', ['branch', '--no-color'], { cwd: nativePath(cwd), encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
       this.refreshingBranches = false
       if (err) {
         this.branches = []
@@ -708,7 +708,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const cwd = this.workspace?.cwd
     if (!cwd || !name) return
     const prev = this.currentBranch
-    childProcess.execFile('git', ['checkout', name], { cwd, encoding: 'utf8', timeout: 10000 }, (err, _stdout, stderr) => {
+    childProcess.execFile('git', ['checkout', name], { cwd: nativePath(cwd), encoding: 'utf8', timeout: 10000 }, (err, _stdout, stderr) => {
       if (err) {
         const stderrStr = String(stderr ?? '').trim()
         const full = stderrStr || String(err?.message ?? err)
@@ -736,7 +736,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     return cwd.replace(/\\/g, '/')
   }
 
-  private async buildLaunchCommand (claudeArgs: string[]): Promise<{ resolved: ResolvedCommand, sandboxName?: string, terminalId?: string } | null> {
+  private async buildLaunchCommand (claudeArgs: string[]): Promise<{ resolved: ResolvedCommand, sandboxName?: string, terminalId?: string, hostProjectsPath?: string } | null> {
     const allArgs = [...claudeArgs, ...this.skipPermsArgs()]
     if (this.useDockerSandbox) {
       const projectName = path.basename(this.workspace?.cwd || 'sandbox')
@@ -756,6 +756,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       // Use docker run (not docker sandbox run) for full control over mounts.
       // docker sandbox run creates destructive symlinks through bind mounts.
       const dockerArgs = ['run', '--rm', '-it', '--name', sandboxName,
+        '--security-opt', 'no-new-privileges',
         '-v', `${cwd}:${posixCwd}`,
         '-w', posixCwd,
         '-e', `CLAUDE_DOCK_CWD=${posixCwd}`,
@@ -773,12 +774,19 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         dockerArgs.push('-e', `CLAUDE_DOCK_FORWARD_PORTS=${ports.join(',')}`)
       }
 
+      const home = os.homedir()
       if (this.mountClaudeDir) {
-        const home = os.homedir()
+        // Full mount: includes projects, credentials, config.
         dockerArgs.push(
           '-v', `${path.join(home, '.claude')}:/home/agent/.claude`,
           '-v', `${path.join(home, '.claude.json')}:/home/agent/.claude.json`,
         )
+      } else {
+        // Minimal mount: temp dir for projects so we can read transcripts (todos) from the host.
+        // Doesn't expose credentials or config, doesn't pollute host's ~/.claude/projects.
+        const tmpProjects = path.join(os.tmpdir(), 'claude-dock', sandboxName, 'projects')
+        try { fsSync.mkdirSync(tmpProjects, { recursive: true }) } catch {}
+        dockerArgs.push('-v', `${tmpProjects}:/home/agent/.claude/projects`)
       }
 
       dockerArgs.push(this.effectiveDockerImage, 'claude', ...allArgs)
@@ -788,7 +796,10 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         this.notifications.error("'docker' not found on PATH",
           'Install Docker Desktop and ensure docker is on your PATH.')
       }
-      return { resolved, sandboxName, terminalId }
+      const hostProjectsPath = this.mountClaudeDir
+        ? path.join(home, '.claude', 'projects')
+        : path.join(os.tmpdir(), 'claude-dock', sandboxName, 'projects')
+      return { resolved, sandboxName, terminalId, hostProjectsPath }
     }
 
     const resolved = await resolveForPty('claude', allArgs)
@@ -996,10 +1007,16 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const tag = target.tagName?.toUpperCase()
     // Let buttons, inputs, selects handle their own keys
     if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-    // Prevent browser from interpreting space as scroll/click inside the terminal host
+    // Prevent browser from interpreting space/keys as scroll/click inside the terminal host
     if (event.key === ' ') {
       event.preventDefault()
     }
+    // Forward the keypress to the active terminal and refocus it
+    const active = this.getActiveTerminal() as any
+    if (active?.sendInput && event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      active.sendInput(event.key)
+    }
+    this.focusTerminal()
   }
 
   closeTerminal (id: string): void {
@@ -1056,7 +1073,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
 
   /** Claude Code project dir name: replace :, \, /, . with - */
   private projectDirName (cwd: string): string {
-    return cwd.replace(/[:\\/\.]/g, '-')
+    return nativePath(cwd).replace(/[:\\/\.]/g, '-')
   }
 
   private refreshingResumeOptions = false
@@ -1214,8 +1231,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     }
 
     const cwd = this.workspace.cwd
+    const cwdNative = nativePath(cwd)
     let cwdExists = false
-    try { await fsSync.promises.stat(cwd); cwdExists = true } catch { }
+    try { await fsSync.promises.stat(cwdNative); cwdExists = true } catch { }
     if (cwd && !cwdExists) {
       this.notifications.error('Workspace cwd does not exist', cwd)
       this.logger.warn('resolveWorkspaceProfile: cwd does not exist', { workspaceId: this._workspaceId, cwd })
@@ -1260,7 +1278,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   }
 
   private async openWorkspaceTerminal (
-    launch?: { resolved?: { command?: string, args?: string[] }, sandboxName?: string, terminalId?: string } | null,
+    launch?: { resolved?: { command?: string, args?: string[] }, sandboxName?: string, terminalId?: string, hostProjectsPath?: string } | null,
     titleHint?: string,
   ): Promise<void> {
     try {
@@ -1337,7 +1355,10 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         sandboxName: launch?.sandboxName,
       }
       if (launch?.sandboxName) {
-        entry.virtualPid = this.runtimeSvc.trackContainer(launch.sandboxName)
+        entry.virtualPid = this.runtimeSvc.trackContainer(launch.sandboxName, terminalId)
+        if (launch.hostProjectsPath) {
+          this.events.registerTerminalProjectsPath(terminalId, launch.hostProjectsPath)
+        }
       }
       this.terminals.push(entry)
       this.syncTerminalRegistry()

@@ -11,7 +11,7 @@ import { ClaudeDockLifecycleService } from '../services/lifecycle.service'
 import { HookHealthService, HookHealthStatus } from '../services/hookHealth.service'
 import { SessionRuntimeService, SystemResourceStat } from '../services/sessionRuntime.service'
 import { WorkspacesService } from '../services/workspaces.service'
-import { ClaudeSession, ClaudeTodoStatus, GroupSortPreset, SessionGroup, SortPreset, UsageSummary, Workspace } from '../models'
+import { ClaudeSession, ClaudeTodo, ClaudeTodoStatus, GroupSortPreset, SessionGroup, SortPreset, UsageSummary, Workspace } from '../models'
 import { displayPath, formatAge, normalizePath, pathBase, usageLabel, usagePct } from '../utils'
 import { WorkspaceTabComponent } from './workspaceTab.component'
 
@@ -29,7 +29,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
         </div>
 
         <div class="cd-docker-image-block">
-          <div class="cd-docker-image-label">Docker Sandbox Image:</div>
+          <div class="cd-docker-image-label">Default Docker image:</div>
           <input class="cd-docker-image-input" type="text" aria-label="Default Docker image"
             [value]="defaultDockerImage"
             [placeholder]="'ghcr.io/troshab/claude-dock:1.0.0'"
@@ -72,7 +72,6 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
         <div class="cd-controls">
           <select class="form-control form-control-sm w-auto" aria-label="Sort workspaces" [value]="groupSortPreset" (change)="setGroupSortPreset($any($event.target).value)">
             <option value="flat">Workspace: none</option>
-            <option value="none">Workspace: default</option>
             <option value="waiting">Workspace: waiting first</option>
             <option value="path">Workspace: by path</option>
           </select>
@@ -122,48 +121,9 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
 
         <div class="cd-groups-scroll" *ngIf="groupSortPreset === 'flat'">
           <div class="list-group cd-list">
-            <div
-              class="list-group-item list-group-item-action cd-row"
-              role="button" tabindex="0"
-              *ngFor="let s of sessionsSorted"
-              (click)="openWorkspaceForSession(s)"
-              (keydown.enter)="openWorkspaceForSession(s)"
-              (keydown.space)="openWorkspaceForSession(s); $event.preventDefault()"
-            >
-              <div class="cd-row-top">
-                <div class="cd-row-title">
-                  <span class="font-weight-bold">{{ sessionLabel(s, true) }}</span>
-                </div>
-                <div class="cd-row-right">
-                  <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-danger text-dark"
-                    [disabled]="!canCloseSession(s)"
-                    (click)="closeSession(s, $event)"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <ul class="cd-todos" *ngIf="todosFor(s).length">
-                <li class="cd-todo" *ngFor="let t of todosFor(s)">
-                  <span class="cd-todo-dot"
-                        [class.pending]="!t.status || t.status === 'pending'"
-                        [class.in-progress]="t.status === 'in_progress'"
-                        [class.completed]="t.status === 'completed'"></span>
-                  <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
-                </li>
-              </ul>
-
-              <div class="cd-row-bottom">
-                <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-                <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-                <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
-                <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
-              </div>
-            </div>
+            <ng-container *ngFor="let s of sessionsSorted">
+              <ng-container *ngTemplateOutlet="sessionRow; context: { $implicit: s, flat: true }"></ng-container>
+            </ng-container>
           </div>
         </div>
 
@@ -172,68 +132,158 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
             <summary class="cd-group-summary">
               <span class="cd-group-chevron"></span>
               <span class="font-weight-bold">{{ normalizeCwd(g.cwd) }}</span>
+              <button type="button" class="btn btn-sm btn-success" title="Switch to workspace" (click)="switchToGroup(g, $event)">Switch</button>
+              <button type="button" class="btn btn-sm btn-success" title="New terminal in workspace" (click)="newTerminalInGroup(g, $event)">New</button>
               <span class="cd-group-actions">
                 <span class="badge cd-outline-warn" *ngIf="g.waitingCount">{{ g.waitingCount }} waiting</span>
                 <span class="badge cd-outline-ok" *ngIf="g.workingCount">{{ g.workingCount }} working</span>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-success"
-                  title="New terminal in workspace"
-                  (click)="newTerminalInGroup(g, $event)"
-                >
-                  New
-                </button>
+                <button type="button" class="btn btn-sm btn-danger text-dark" title="Close all sessions in group" (click)="closeGroup(g, $event)">Close</button>
               </span>
             </summary>
 
             <div class="list-group cd-list">
-              <div
-                class="list-group-item list-group-item-action cd-row"
-                role="button" tabindex="0"
-                *ngFor="let s of g.sessions"
-                (click)="openWorkspaceForSession(s)"
-                (keydown.enter)="openWorkspaceForSession(s)"
-                (keydown.space)="openWorkspaceForSession(s); $event.preventDefault()"
-              >
-                <div class="cd-row-top">
-                  <div class="cd-row-title">
-                    <span class="font-weight-bold">{{ sessionLabel(s, true) }}</span>
-                  </div>
-                  <div class="cd-row-right">
-                    <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}</span>
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-danger text-dark"
-                      [disabled]="!canCloseSession(s)"
-                      (click)="closeSession(s, $event)"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-
-                <ul class="cd-todos" *ngIf="todosFor(s).length">
-                  <li class="cd-todo" *ngFor="let t of todosFor(s)">
-                    <span class="cd-todo-dot"
-                          [class.pending]="!t.status || t.status === 'pending'"
-                          [class.in-progress]="t.status === 'in_progress'"
-                          [class.completed]="t.status === 'completed'"></span>
-                    <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
-                  </li>
-                </ul>
-
-                <div class="cd-row-bottom">
-                  <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-                  <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-                  <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
-                  <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
-                </div>
-              </div>
+              <ng-container *ngFor="let s of g.sessions">
+                <ng-container *ngTemplateOutlet="sessionRow; context: { $implicit: s, flat: false }"></ng-container>
+              </ng-container>
             </div>
           </details>
         </div>
         </div>
       </main>
+
+      <ng-template #sessionRow let-s let-flat="flat">
+        <div class="list-group-item cd-row">
+          <!-- Header: title + model + status + actions -->
+          <div class="cd-row-top">
+            <div class="cd-row-title">
+              <span class="font-weight-bold" *ngIf="flat">{{ normalizeCwd(s.cwd) || sessionLabel(s, true) }}</span>
+              <span class="cd-flat-title text-muted" *ngIf="flat && s.cwd && s.title">({{ s.title }})</span>
+              <span class="font-weight-bold" *ngIf="!flat">{{ sessionLabel(s, true) }}</span>
+              <button type="button" class="btn btn-sm btn-success cd-switch-btn" (click)="openWorkspaceForSession(s)" title="Switch to workspace">Switch</button>
+              <span class="cd-model-label" *ngIf="s.model" [title]="s.model">{{ shortModel(s.model) }}</span>
+              <span class="cd-bypass-label" *ngIf="s.permissionMode === 'bypassPermissions' || s.permissionMode === 'dangerouslySkipPermissions'">--dangerouslySkipPermissions</span>
+            </div>
+            <div class="cd-row-right">
+              <span class="badge cd-outline-team" *ngIf="s.teamName">{{ s.teamName }}</span>
+              <span class="badge cd-outline-agents" *ngIf="!s.teamName && s.activeSubagents">{{ s.activeSubagents }} agent{{ s.activeSubagents > 1 ? 's' : '' }}</span>
+              <span class="badge" [class]="badgeClass(s.status)">{{ s.status }}{{ s.endReason ? ' (' + s.endReason + ')' : '' }}</span>
+              <button type="button" class="btn btn-sm btn-danger text-dark" [disabled]="!canCloseSession(s)" (click)="closeSession(s, $event)">Close</button>
+            </div>
+          </div>
+
+          <!-- Current activity: what the agent is doing right now -->
+          <div class="cd-activity" *ngIf="s.currentActivity">{{ s.currentActivity }}</div>
+
+          <!-- Error alert -->
+          <div class="cd-alert-error" *ngIf="s.lastError || s.lastFailedTool">
+            <span class="cd-alert-tag">{{ s.isInterrupt ? 'Interrupted' : 'Error' }}</span>
+            <span *ngIf="s.lastFailedTool"> in {{ s.lastFailedTool }}</span>
+            <span *ngIf="s.lastError">: {{ truncate(s.lastError, 200) }}</span>
+          </div>
+
+          <!-- Permission: Allow/Deny -->
+          <div class="cd-action-card cd-action-permission" *ngIf="s.permissionPending">
+            <div class="cd-action-header">
+              <span class="cd-alert-tag">Permission</span> {{ s.permissionPending }}
+            </div>
+            <div class="cd-action-detail" *ngIf="s.permissionDetail">{{ s.permissionDetail }}</div>
+            <div class="cd-action-actions" *ngIf="s.permissionRequestId">
+              <button class="btn btn-sm btn-success" (click)="allowPermission(s, $event)">Allow</button>
+              <button class="btn btn-sm btn-outline-danger" (click)="denyPermission(s, $event)">Deny</button>
+            </div>
+            <div *ngIf="!s.permissionRequestId" class="text-muted small" style="padding-top:var(--cd-gap-xs)">
+              Respond in terminal
+            </div>
+          </div>
+
+          <!-- SubagentStop: Continue -->
+          <div class="cd-action-card cd-action-subagent" *ngIf="s.subagentStopRequestId">
+            <div class="cd-action-header">
+              <span class="cd-alert-tag">Subagent</span> {{ s.lastSubagentType || 'Subagent' }} stopped
+            </div>
+            <div class="cd-action-actions">
+              <button class="btn btn-sm btn-success" (click)="continueSubagent(s, $event)">Continue</button>
+            </div>
+          </div>
+
+          <!-- TeammateIdle: Continue -->
+          <div class="cd-action-card cd-action-teammate" *ngIf="s.teammateIdleRequestId">
+            <div class="cd-action-header">
+              <span class="cd-alert-tag">Idle</span> {{ s.teammateName || 'Teammate' }} is idle
+            </div>
+            <div class="cd-action-actions">
+              <button class="btn btn-sm btn-success" (click)="continueTeammate(s, $event)">Continue</button>
+            </div>
+          </div>
+
+          <!-- TaskCompleted: Accept/Reject -->
+          <div class="cd-action-card cd-action-task" *ngIf="s.taskCompletedRequestId">
+            <div class="cd-action-header">
+              <span class="cd-alert-tag">Task</span> {{ s.taskCompletedDetail || 'Task completed' }}
+            </div>
+            <div class="cd-action-detail" *ngIf="s.taskDescription">{{ truncate(s.taskDescription, 200) }}</div>
+            <div class="cd-action-actions">
+              <input class="cd-action-input" type="text" placeholder="Reject reason..." (keydown.enter)="rejectTask(s, $event)">
+              <button class="btn btn-sm btn-outline-danger" (click)="rejectTask(s, $event)">Reject</button>
+              <button class="btn btn-sm btn-success" (click)="acceptTask(s, $event)">Accept</button>
+            </div>
+          </div>
+
+          <!-- User's last prompt (asked) then agent message (responded) -->
+          <div class="cd-session-prompt" *ngIf="s.lastPrompt">"{{ truncate(s.lastPrompt, 120) }}"</div>
+          <div class="cd-session-message" *ngIf="s.lastMessage">{{ s.lastMessage }}</div>
+
+          <!-- Todos -->
+          <ul class="cd-todos" *ngIf="todosFor(s).length">
+            <li class="cd-todo" *ngFor="let t of todosFor(s)">
+              <span class="cd-todo-dot"
+                    [class.pending]="!t.status || t.status === 'pending'"
+                    [class.in-progress]="t.status === 'in_progress'"
+                    [class.completed]="t.status === 'completed'"></span>
+              <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
+            </li>
+          </ul>
+
+          <!-- Subagent rows (mini session cards) -->
+          <div class="cd-agents" *ngIf="subagentTodosFor(s).length">
+            <div class="cd-agents-header">{{ s.teamName || 'Subagents' }}</div>
+            <div *ngFor="let sa of subagentTodosFor(s)" class="cd-agent-row">
+              <div class="cd-agent-top">
+                <span class="cd-agent-name">{{ sa.type }}</span>
+                <span class="badge" [class]="agentBadgeClass(sa.todos)">{{ agentStatus(sa.todos) }}</span>
+              </div>
+              <ul class="cd-agent-tasks">
+                <li *ngFor="let t of sa.todos" class="cd-agent-task">
+                  <span class="cd-todo-dot"
+                        [class.pending]="!t.status || t.status === 'pending'"
+                        [class.in-progress]="t.status === 'in_progress'"
+                        [class.completed]="t.status === 'completed'"></span>
+                  <span class="cd-todo-text small" [class.done]="t.status === 'completed'">{{ t.content }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Structured metadata line: subagents, tasks, compact, team, hook info -->
+          <div class="cd-meta" *ngIf="hasMetaInfo(s)">
+            <span *ngIf="s.activeSubagents" class="cd-meta-item">{{ s.activeSubagents }} {{ s.lastSubagentType || 'subagent' }}{{ s.activeSubagents > 1 ? 's' : '' }}</span>
+            <span *ngIf="s.tasksCompleted" class="cd-meta-item">{{ s.tasksCompleted }} task{{ s.tasksCompleted !== 1 ? 's' : '' }} done<span *ngIf="s.lastTaskSubject" class="cd-meta-detail">: {{ truncate(s.lastTaskSubject, 40) }}</span></span>
+            <span *ngIf="s.compactCount" class="cd-meta-item">{{ s.compactCount }}x {{ s.compactTrigger || 'compact' }}</span>
+            <span *ngIf="s.teammateIdle" class="cd-meta-item">{{ s.teammateName || 'teammate' }} idle<span *ngIf="s.teamName" class="cd-meta-detail"> ({{ s.teamName }})</span></span>
+            <span *ngIf="s.agentType" class="cd-meta-item">agent: {{ s.agentType }}</span>
+            <span *ngIf="s.permissionMode && s.permissionMode !== 'default'" class="cd-meta-item">mode: {{ s.permissionMode }}</span>
+            <span *ngIf="s.lastHookType" class="cd-meta-item">hook: {{ s.lastHookType }}</span>
+          </div>
+
+          <!-- Footer: tool, timing, runtime -->
+          <div class="cd-row-bottom">
+            <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
+            <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
+            <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
+            <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
+          </div>
+        </div>
+      </ng-template>
     </ng-container>
 
     <ng-template #hooksSetup>
@@ -351,8 +401,8 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-groups-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: var(--cd-gap-sm); }
 
     .cd-list { border-radius: var(--cd-radius); overflow-y: auto; list-style: none; padding-left: 0; padding-right: var(--cd-gap-sm); margin: 0; flex: 1; min-height: 0; }
-    .cd-row { display: flex; flex-direction: column; gap: var(--cd-gap-xs); text-align: left; }
-    .cd-row[role="button"] { cursor: pointer; }
+    .cd-row { display: flex; flex-direction: column; gap: var(--cd-gap-xs); text-align: left; padding-top: var(--cd-gap-md); border-top: 2px solid var(--cd-border-light); }
+    .cd-list > .cd-row:first-child { border-top: none; }
     .cd-row-top { display: flex; align-items: last baseline; justify-content: space-between; gap: var(--cd-gap-sm); }
     .cd-row-title { display: flex; gap: var(--cd-gap-sm); align-items: baseline; flex-wrap: wrap; min-width: 0; font-size: 1.05em; }
     .cd-row-right { display: inline-flex; align-items: center; gap: var(--cd-gap-xs); flex-shrink: 0; }
@@ -371,6 +421,8 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
 
     .cd-outline-warn { border: 1px solid var(--cd-yellow); color: var(--cd-yellow); background: transparent; }
     .cd-outline-ok { border: 1px solid var(--cd-green); color: var(--cd-green); background: transparent; }
+    .cd-outline-team { border: 1px solid #9b59b6; color: #9b59b6; background: transparent; }
+    .cd-outline-agents { border: 1px solid #3498db; color: #3498db; background: transparent; }
     .cd-ws-item { display: flex !important; flex-direction: row; align-items: center; gap: var(--cd-gap-sm); cursor: pointer; padding: var(--cd-gap-xs) var(--cd-gap-sm); }
     .cd-ws-remove {
       border: none;
@@ -411,13 +463,37 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-install-btn code {
       font-weight: 700;
     }
-    .cd-docker-image-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--cd-gap-xs); }
-    .cd-docker-image-label { font-weight: 600; opacity: .8; white-space: nowrap; }
-    .cd-docker-image-input { background: transparent; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-sm); padding: var(--cd-gap-xs) var(--cd-gap-sm); color: inherit; font-family: var(--cd-font-mono); font-size: 0.85em; min-width: 200px; }
+    .cd-docker-image-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--cd-gap-micro); }
+    .cd-docker-image-label { font-size: 0.75em; font-weight: 600; opacity: .6; white-space: nowrap; }
+    .cd-docker-image-input { background: transparent; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-sm); padding: var(--cd-gap-micro) var(--cd-gap-xs); color: inherit; font-family: var(--cd-font-mono); font-size: 0.75em; min-width: 180px; }
     .cd-docker-image-input:focus { outline: none; border-color: var(--cd-green-border); }
+    .cd-switch-btn { padding: 0 var(--cd-gap-xs); font-size: 0.75em; line-height: 1.4; }
+    .cd-flat-title { font-size: 0.82em; opacity: var(--cd-opacity-dim); white-space: nowrap; }
+    .cd-model-label { font-family: var(--cd-font-mono); font-size: 0.78em; opacity: .5; }
+    .cd-bypass-label { font-family: var(--cd-font-mono); font-size: 0.75em; color: var(--cd-red); opacity: .8; }
+    .cd-activity { font-family: var(--cd-font-mono); font-size: 0.88em; color: var(--cd-green); opacity: .95; padding: var(--cd-gap-micro) 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cd-alert-error { font-size: 0.88em; color: var(--cd-red); padding: var(--cd-gap-xs) var(--cd-gap-sm); border-left: 3px solid var(--cd-red); margin: var(--cd-gap-micro) 0; }
+    .cd-alert-warn { font-size: 0.88em; color: var(--cd-orange); padding: var(--cd-gap-xs) var(--cd-gap-sm); border-left: 3px solid var(--cd-orange); margin: var(--cd-gap-micro) 0; }
+    .cd-action-card { font-size: 0.88em; padding: var(--cd-gap-xs) var(--cd-gap-sm); border-left: 3px solid var(--cd-orange); margin: var(--cd-gap-xs) 0; background: rgba(230, 126, 34, .06); border-radius: 0 var(--cd-radius-sm) var(--cd-radius-sm) 0; }
+    .cd-action-permission { color: var(--cd-orange); }
+    .cd-action-stop { color: var(--cd-green); border-left-color: var(--cd-green); background: var(--cd-green-subtle); }
+    .cd-action-subagent { color: var(--cd-green); border-left-color: var(--cd-green); background: var(--cd-green-subtle); }
+    .cd-action-teammate { color: var(--cd-yellow); border-left-color: var(--cd-yellow); background: rgba(215, 169, 42, .06); }
+    .cd-action-task { color: var(--cd-yellow); border-left-color: var(--cd-yellow); background: rgba(215, 169, 42, .06); }
+    .cd-action-header { font-weight: 600; }
+    .cd-action-detail { font-family: var(--cd-font-mono); font-size: 0.92em; opacity: .85; padding: var(--cd-gap-micro) 0; word-break: break-word; }
+    .cd-action-actions { display: flex; gap: var(--cd-gap-sm); padding-top: var(--cd-gap-xs); align-items: center; }
+    .cd-action-input { flex: 1; background: transparent; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-sm); padding: var(--cd-gap-micro) var(--cd-gap-xs); color: inherit; font-family: var(--cd-font-mono); font-size: 0.88em; min-width: 0; }
+    .cd-action-input:focus { outline: none; border-color: var(--cd-green-border); }
+    .cd-alert-tag { font-weight: 700; }
+    .cd-session-message { opacity: var(--cd-opacity-muted); font-style: italic; padding: var(--cd-gap-micro) 0; font-size: 0.9em; }
+    .cd-session-prompt { opacity: var(--cd-opacity-dim); padding: var(--cd-gap-micro) 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.88em; font-style: italic; }
+    .cd-meta { display: flex; flex-wrap: wrap; gap: 0; font-size: 0.82em; opacity: .55; padding: var(--cd-gap-xs) 0; }
+    .cd-meta-item + .cd-meta-item::before { content: ' · '; white-space: pre; opacity: .6; }
+    .cd-meta-detail { opacity: .75; }
 
 
-    .cd-group { border: 1px solid var(--cd-border); border-radius: var(--cd-radius); padding: var(--cd-gap-sm); margin-bottom: var(--cd-gap-sm); }
+    .cd-group { border: none; border-bottom: 1px solid var(--cd-border); border-radius: 0; padding: var(--cd-gap-md) 0 var(--cd-gap-sm) 0; margin-bottom: 0; }
     .cd-group summary { list-style: none; }
     .cd-group summary::-webkit-details-marker { display: none; }
     .cd-group-summary { display: flex; gap: var(--cd-gap-sm); align-items: center; cursor: pointer; margin-bottom: 0; padding: var(--cd-gap-xs) var(--cd-gap-xs-plus); }
@@ -447,6 +523,14 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       opacity: 0.35;
     }
     .cd-todo-text.done { text-decoration: line-through; opacity: var(--cd-opacity-dim); }
+    .cd-tool-response { font-family: var(--cd-font-mono); font-size: 0.78em; opacity: .5; white-space: pre-wrap; word-break: break-all; max-height: 3.2em; overflow: hidden; margin: var(--cd-gap-micro) 0; }
+    .cd-agents { margin: var(--cd-gap-xs) 0 0 0; padding-top: var(--cd-gap-sm); border-top: 1px solid var(--cd-border); display: flex; flex-direction: column; gap: var(--cd-gap-xs); }
+    .cd-agents-header { font-size: 0.78em; font-weight: 600; opacity: .5; text-transform: uppercase; letter-spacing: 0.05em; }
+    .cd-agent-row { padding: var(--cd-gap-xs) var(--cd-gap-sm); border-left: 2px solid var(--cd-border-light); border-radius: 0 var(--cd-radius-sm) var(--cd-radius-sm) 0; background: rgba(255,255,255,.02); }
+    .cd-agent-top { display: flex; align-items: center; gap: var(--cd-gap-sm); }
+    .cd-agent-name { font-family: var(--cd-font-mono); font-size: 0.85em; font-weight: 600; }
+    .cd-agent-tasks { list-style: none; padding-left: var(--cd-gap-md); margin: var(--cd-gap-micro) 0 0 0; display: flex; flex-direction: column; gap: var(--cd-gap-micro); }
+    .cd-agent-task { display: flex; gap: var(--cd-gap-sm); align-items: flex-start; }
   `],
 })
 export class DashboardTabComponent extends BaseTabComponent {
@@ -507,7 +591,8 @@ export class DashboardTabComponent extends BaseTabComponent {
 
     // ConfigService.store may be undefined very early during startup.
     this.sortPreset = ((this.cfg as any).store?.claudeDock?.sortPreset ?? 'status') as SortPreset
-    this.groupSortPreset = ((this.cfg as any).store?.claudeDock?.groupSortPreset ?? 'waiting') as GroupSortPreset
+    const savedGroupSort = (this.cfg as any).store?.claudeDock?.groupSortPreset ?? 'waiting'
+    this.groupSortPreset = (savedGroupSort === 'none' ? 'waiting' : savedGroupSort) as GroupSortPreset
 
     this.zone.runOutsideAngular(() => {
       this.subscribeUntilDestroyed(this.events.sessions$, () => this.recompute())
@@ -523,6 +608,10 @@ export class DashboardTabComponent extends BaseTabComponent {
       })
       this.subscribeUntilDestroyed(this.focused$, () => {
         this.hookHealthSvc.checkNow()
+        this.events.setDashboardActive(true)
+      })
+      this.subscribeUntilDestroyed(this.blurred$, () => {
+        this.events.setDashboardActive(false)
       })
       this.subscribeUntilDestroyed(this.runtimeSvc.stats$, (s: Record<number, any>) => {
         this.runtimeStats = s ?? {}
@@ -665,6 +754,29 @@ export class DashboardTabComponent extends BaseTabComponent {
     return this.todosSvc.getTodosForTranscript(s.transcriptPath)
   }
 
+  agentStatus (todos: ClaudeTodo[]): string {
+    if (todos.every(t => t.status === 'completed')) return 'done'
+    if (todos.some(t => t.status === 'in_progress')) return 'working'
+    return 'pending'
+  }
+
+  agentBadgeClass (todos: ClaudeTodo[]): string {
+    const status = this.agentStatus(todos)
+    if (status === 'done') return 'badge-secondary'
+    if (status === 'working') return 'badge-success'
+    return 'badge-warning'
+  }
+
+  subagentTodosFor (s: ClaudeSession): Array<{ type: string, todos: ClaudeTodo[] }> {
+    if (!s.subagentTranscripts?.length) return []
+    const out: Array<{ type: string, todos: ClaudeTodo[] }> = []
+    for (const sa of s.subagentTranscripts) {
+      const todos = this.todosSvc.getTodosForTranscript(sa.path)
+      if (todos.length) out.push({ type: sa.type, todos })
+    }
+    return out
+  }
+
   sessionLabel (s: ClaudeSession, grouped = false): string {
     if (grouped) {
       return s.title || (s.sessionId ? s.sessionId.slice(0, 8) : '') || 'Claude Code'
@@ -687,10 +799,16 @@ export class DashboardTabComponent extends BaseTabComponent {
 
   private runtimeFor (s: ClaudeSession): any | null {
     const pid = Number(s.hostPid)
-    if (!Number.isFinite(pid) || pid <= 0) {
-      return null
+    if (Number.isFinite(pid) && pid > 0) {
+      const stat = this.runtimeStats[pid]
+      if (stat?.running) return stat
     }
-    return this.runtimeStats[pid] ?? null
+    // Fallback: Docker container stats via terminalId
+    if (s.terminalId) {
+      const containerStat = this.runtimeSvc.getStatByTerminalId(s.terminalId)
+      if (containerStat?.running) return containerStat
+    }
+    return null
   }
 
   private formatCPU (v?: number | null): string {
@@ -722,6 +840,76 @@ export class DashboardTabComponent extends BaseTabComponent {
     return true
   }
 
+  shortModel (model: string): string {
+    if (!model) return ''
+    // "claude-opus-4-6" -> "opus-4.6", "claude-sonnet-4-5-20250929" -> "sonnet-4.5"
+    const m = model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+    return m.replace(/-(\d+)-(\d+)/, '-$1.$2')
+  }
+
+  truncate (s: string, max = 100): string {
+    if (!s) return ''
+    return s.length > max ? s.slice(0, max) + '...' : s
+  }
+
+  allowPermission (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (s.permissionRequestId) {
+      this.events.respondToHookAction(s.permissionRequestId, 'allow')
+    }
+  }
+
+  denyPermission (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (s.permissionRequestId) {
+      this.events.respondToHookAction(s.permissionRequestId, 'deny', 'Denied from Claude Dock')
+    }
+  }
+
+
+  continueSubagent (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (s.subagentStopRequestId) {
+      this.events.respondToHookAction(s.subagentStopRequestId, 'block', 'Continue from Claude Dock')
+    }
+  }
+
+  continueTeammate (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (s.teammateIdleRequestId) {
+      this.events.respondToHookAction(s.teammateIdleRequestId, 'block', 'Continue from Claude Dock')
+    }
+  }
+
+  rejectTask (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (!s.taskCompletedRequestId) return
+    const input = (event?.target as HTMLElement)?.closest('.cd-action-card')?.querySelector('input') as HTMLInputElement | null
+    this.events.respondToHookAction(s.taskCompletedRequestId, 'block', input?.value?.trim() || 'Rejected from Claude Dock')
+  }
+
+  acceptTask (s: ClaudeSession, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    if (s.taskCompletedRequestId) {
+      this.events.respondToHookAction(s.taskCompletedRequestId, 'allow')
+    }
+  }
+
+  hasMetaInfo (s: ClaudeSession): boolean {
+    return !!(
+      s.activeSubagents || s.tasksCompleted || s.compactCount ||
+      s.teammateIdle || s.agentType ||
+      (s.permissionMode && s.permissionMode !== 'default') ||
+      s.lastHookType
+    )
+  }
+
   private visibleRuntimeSessions (): ClaudeSession[] {
     // Visibility is driven by hook events (source/status/TTL), not runtime stats.
     // Runtime stats are best-effort and should not hide active sessions.
@@ -742,20 +930,18 @@ export class DashboardTabComponent extends BaseTabComponent {
   }
 
   totalCpuLabel (): string {
-    const total = this.visibleRuntimeSessions().reduce((acc, s) => {
-      const rt = this.runtimeFor(s)
-      if (!rt?.running) return acc
-      return acc + (Number(rt.cpuPercent ?? 0) || 0)
-    }, 0)
+    let total = 0
+    for (const rt of Object.values(this.runtimeStats)) {
+      if (rt?.running) total += Number(rt.cpuPercent ?? 0) || 0
+    }
     return this.formatCPU(total)
   }
 
   totalRamLabel (): string {
-    const total = this.visibleRuntimeSessions().reduce((acc, s) => {
-      const rt = this.runtimeFor(s)
-      if (!rt?.running) return acc
-      return acc + (Number(rt.memoryBytes ?? 0) || 0)
-    }, 0)
+    let total = 0
+    for (const rt of Object.values(this.runtimeStats)) {
+      if (rt?.running) total += Number(rt.memoryBytes ?? 0) || 0
+    }
     return this.formatRAM(total)
   }
 
@@ -1016,6 +1202,29 @@ export class DashboardTabComponent extends BaseTabComponent {
       action(tab)
     }
     tryRun(12)
+  }
+
+  closeGroup (g: SessionGroup, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    for (const s of g.sessions) {
+      this.closeSession(s)
+    }
+  }
+
+  switchToGroup (g: SessionGroup, event?: Event): void {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+
+    const cwd = (g.cwd ?? '').trim()
+    if (!cwd) return
+
+    let ws = this.workspacesSvc.findByCwd(cwd)
+    if (!ws) {
+      ws = this.workspacesSvc.create({ cwd, title: pathBase(cwd) || cwd })
+      this.refreshWorkspaces()
+    }
+    this.openWorkspace(ws.id)
   }
 
   newTerminalInGroup (g: SessionGroup, event?: Event): void {

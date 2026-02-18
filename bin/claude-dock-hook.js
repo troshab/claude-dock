@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Claude Dock hook: append minimal JSONL event to ~/.claude/claude-dock/events.jsonl */
+/* Claude Dock hook: forward events to Tabby via TCP transport */
 
 const fs = require('fs')
 const os = require('os')
@@ -78,6 +78,90 @@ function sessionDebugPath (sessionId, transcriptPath) {
     return path.join(debugDir(), `session-${sanitizeFilePart(base)}.log`)
   }
   return path.join(debugDir(), 'session-unknown.log')
+}
+
+function summarizeToolInput (input, toolName) {
+  if (!input || typeof input !== 'object') return undefined
+  const tool = (toolName || '').toLowerCase()
+  try {
+    if (tool === 'bash') {
+      return JSON.stringify({
+        command: shortText(input.command || '', 300),
+        ...(input.description ? { description: shortText(input.description, 100) } : {}),
+        ...(input.timeout ? { timeout: input.timeout } : {}),
+        ...(input.run_in_background ? { run_in_background: true } : {}),
+      })
+    }
+    if (tool === 'edit') {
+      return JSON.stringify({
+        file_path: input.file_path || '',
+        old_string: shortText(input.old_string || '', 80),
+        new_string: shortText(input.new_string || '', 80),
+        ...(input.replace_all ? { replace_all: true } : {}),
+      })
+    }
+    if (tool === 'write') {
+      return JSON.stringify({
+        file_path: input.file_path || '',
+        content_length: (input.content || '').length,
+      })
+    }
+    if (tool === 'read') {
+      return JSON.stringify({
+        file_path: input.file_path || '',
+        ...(input.offset ? { offset: input.offset } : {}),
+        ...(input.limit ? { limit: input.limit } : {}),
+      })
+    }
+    if (tool === 'grep') {
+      return JSON.stringify({
+        pattern: input.pattern || '',
+        ...(input.path ? { path: input.path } : {}),
+        ...(input.glob ? { glob: input.glob } : {}),
+        ...(input.output_mode ? { output_mode: input.output_mode } : {}),
+      })
+    }
+    if (tool === 'glob') {
+      return JSON.stringify({
+        pattern: input.pattern || '',
+        ...(input.path ? { path: input.path } : {}),
+      })
+    }
+    if (tool === 'task') {
+      return JSON.stringify({
+        subagent_type: input.subagent_type || '',
+        description: shortText(input.description || '', 100),
+        prompt: shortText(input.prompt || '', 200),
+        ...(input.model ? { model: input.model } : {}),
+      })
+    }
+    if (tool === 'websearch') {
+      return JSON.stringify({
+        query: input.query || '',
+      })
+    }
+    if (tool === 'webfetch') {
+      return JSON.stringify({
+        url: input.url || '',
+        prompt: shortText(input.prompt || '', 100),
+      })
+    }
+    if (tool === 'askuserquestion') {
+      const qs = Array.isArray(input.questions) ? input.questions : []
+      if (qs.length) {
+        const q = qs[0]
+        const opts = (Array.isArray(q.options) ? q.options : []).map(o => o.label).filter(Boolean)
+        return JSON.stringify({
+          question: shortText(q.question || '', 200),
+          ...(opts.length ? { options: opts.join(', ') } : {}),
+        })
+      }
+    }
+    // MCP or unknown tools: truncated JSON
+    return shortText(JSON.stringify(input), 500)
+  } catch {
+    return shortText(JSON.stringify(input), 500)
+  }
 }
 
 function detectSource (payload) {
@@ -213,37 +297,16 @@ function isInsideDocker () {
   } catch { return false }
 }
 
-function transportEndpoint () {
-  if (isInsideDocker()) {
-    return {
-      kind: 'tcp',
-      host: 'host.docker.internal',
-      port: DOCK_TCP_PORT,
-    }
-  }
-  const baseDir = path.join(os.homedir(), '.claude', 'claude-dock')
-  if (process.platform === 'win32') {
-    const homeKey = os.homedir().toLowerCase()
-    const hash = crypto.createHash('sha1').update(homeKey).digest('hex').slice(0, 10)
-    return {
-      kind: 'pipe',
-      path: `\\\\.\\pipe\\claude-dock-${hash}-events-v1`,
-    }
-  }
-  return {
-    kind: 'unix',
-    path: path.join(baseDir, 'hook-events.sock'),
-  }
+function transportHost () {
+  return isInsideDocker() ? 'host.docker.internal' : '127.0.0.1'
 }
 
 function sendEventToTransport (out, timeoutMs = 120) {
-  const endpoint = transportEndpoint()
+  const host = transportHost()
   return new Promise((resolve) => {
     let settled = false
     let wrote = false
-    const sock = endpoint.kind === 'tcp'
-      ? net.createConnection({ host: endpoint.host, port: endpoint.port })
-      : net.createConnection(endpoint.path)
+    const sock = net.createConnection({ host, port: DOCK_TCP_PORT })
 
     const finish = (result) => {
       if (settled) {
@@ -254,8 +317,8 @@ function sendEventToTransport (out, timeoutMs = 120) {
       try { sock.destroy() } catch { }
       resolve({
         ok: !!result?.ok,
-        kind: endpoint.kind,
-        path: endpoint.path || `${endpoint.host}:${endpoint.port}`,
+        kind: 'tcp',
+        path: `${host}:${DOCK_TCP_PORT}`,
         stage: result?.stage || null,
         error: result?.error ? String(result.error) : null,
       })
@@ -346,11 +409,57 @@ async function processPayload (event, input, inputBytes) {
     'permissionMode',
   ])
 
+  const subagentId = pickString(data, [
+    'subagent_id',
+    'subagentId',
+  ])
+
+  const subagentType = pickString(data, [
+    'subagent_type',
+    'subagentType',
+    'agent_type',
+    'agentType',
+  ])
+
+  const hookType = pickString(data, [
+    'hook_type',
+    'hookType',
+    ['hook', 'type'],
+  ])
+
+  // Extended fields from all hook event types
+  const model = pickString(data, ['model'])
+  const agentType = pickString(data, ['agent_type', 'agentType'])
+  const prompt = shortText(pickString(data, ['prompt']) || '', 300)
+  const toolUseId = pickString(data, ['tool_use_id', 'toolUseId'])
+  const error = shortText(pickString(data, ['error']) || '', 400)
+  const isInterrupt = data?.is_interrupt ?? data?.isInterrupt ?? undefined
+  const stopHookActive = data?.stop_hook_active ?? data?.stopHookActive ?? undefined
+  const agentId = pickString(data, ['agent_id', 'agentId']) || subagentId
+  const agentTranscriptPath = pickString(data, [
+    'agent_transcript_path', 'agentTranscriptPath',
+  ])
+  const taskId = pickString(data, ['task_id', 'taskId'])
+  const taskSubject = pickString(data, ['task_subject', 'taskSubject'])
+  const taskDescription = shortText(pickString(data, ['task_description', 'taskDescription']) || '', 300)
+  const teammateName = pickString(data, ['teammate_name', 'teammateName'])
+  const teamName = pickString(data, ['team_name', 'teamName'])
+  const trigger = pickString(data, ['trigger'])
+  const customInstructions = shortText(pickString(data, ['custom_instructions', 'customInstructions']) || '', 200)
+  const reason = pickString(data, ['reason'])
+
+  // Summarize tool_input: extract key fields, strip large content
+  const toolInput = summarizeToolInput(data?.tool_input, toolName)
+  // Truncated tool response
+  const toolResponse = data?.tool_response
+    ? shortText(typeof data.tool_response === 'string' ? data.tool_response : JSON.stringify(data.tool_response), 500)
+    : undefined
+
   const sourceInfo = detectSource(data)
   const source = sourceInfo.source
   const tabbySession = (process.env.CLAUDE_DOCK_TABBY_SESSION || '').trim() || undefined
   const terminalId = (process.env.CLAUDE_DOCK_TERMINAL_ID || '').trim() || undefined
-  const hostPid = Number(process.ppid) || undefined
+  const hostPid = Number(process.env.CLAUDE_DOCK_HOST_PID || process.ppid) || undefined
   const payloadSha1 = crypto.createHash('sha1').update(input, 'utf8').digest('hex')
   const payloadPreview = shortText(input, 600)
   const eventId = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}`
@@ -371,24 +480,46 @@ async function processPayload (event, input, inputBytes) {
     message,
     notification_type: notificationType,
     permission_mode: permissionMode,
+    hook_type: hookType,
+    // Tool details
+    tool_input: toolInput || undefined,
+    tool_response: toolResponse || undefined,
+    tool_use_id: toolUseId || undefined,
+    // Error
+    error: error || undefined,
+    is_interrupt: isInterrupt ?? undefined,
+    // User prompt
+    prompt: prompt || undefined,
+    // Session metadata
+    model: model || undefined,
+    agent_type: agentType || subagentType || undefined,
+    // Subagent
+    agent_id: agentId || undefined,
+    subagent_type: subagentType || undefined,
+    agent_transcript_path: agentTranscriptPath || undefined,
+    stop_hook_active: stopHookActive ?? undefined,
+    // Task
+    task_id: taskId || undefined,
+    task_subject: taskSubject || undefined,
+    task_description: taskDescription || undefined,
+    // Team
+    teammate_name: teammateName || undefined,
+    team_name: teamName || undefined,
+    // Compact
+    trigger: trigger || undefined,
+    custom_instructions: customInstructions || undefined,
+    // Session end
+    reason: reason || undefined,
   }
 
-  const endpoint = transportEndpoint()
   const transportPromise = sendEventToTransport(out, 120).catch((e) => ({
     ok: false,
-    kind: endpoint.kind,
-    path: endpoint.path || `${endpoint.host}:${endpoint.port}`,
+    kind: 'tcp',
+    path: `${transportHost()}:${DOCK_TCP_PORT}`,
     stage: 'exception',
     error: String(e?.message ?? e),
   }))
 
-  // Keep file size bounded.
-  const dir = path.join(os.homedir(), '.claude', 'claude-dock')
-  fs.mkdirSync(dir, { recursive: true })
-  const filePath = path.join(dir, 'events.jsonl')
-  rotateIfLarge(filePath, 25 * 1024 * 1024)
-
-  fs.appendFileSync(filePath, JSON.stringify(out) + '\n', 'utf8')
   const transport = await transportPromise
 
   writeDebugLine({
@@ -517,6 +648,7 @@ async function runDispatcher () {
       windowsHide: true,
       env: {
         ...process.env,
+        CLAUDE_DOCK_HOST_PID: String(process.ppid || ''),
         CLAUDE_DOCK_WORKER_EVENT: event,
         CLAUDE_DOCK_WORKER_PAYLOAD_FILE: payloadFile,
         CLAUDE_DOCK_WORKER_INPUT_BYTES: String(inputBytes),
@@ -544,9 +676,193 @@ async function runDispatcher () {
   }
 }
 
+function sendPermissionAndWait (out, timeoutMs) {
+  const host = transportHost()
+  return new Promise((resolve) => {
+    let settled = false
+    let buf = ''
+    const sock = net.createConnection({ host, port: DOCK_TCP_PORT })
+    const finish = (r) => {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      try { sock.destroy() } catch {}
+      resolve(r)
+    }
+    const t = setTimeout(() => finish(null), timeoutMs)
+    sock.once('connect', () => {
+      try { sock.setNoDelay(true) } catch {}
+      try { sock.setKeepAlive(true, 30000) } catch {}
+      sock.write(JSON.stringify(out) + '\n', 'utf8')
+    })
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('utf8')
+      const idx = buf.indexOf('\n')
+      if (idx >= 0) finish(safeJsonParse(buf.slice(0, idx).trim()))
+    })
+    sock.on('end', () => finish(buf.trim() ? safeJsonParse(buf.trim()) : null))
+    sock.once('error', () => finish(null))
+  })
+}
+
+// Sync bidirectional hooks: hold TCP socket open, wait for dashboard response
+const SYNC_HOOKS = {
+  permission_request: { timeoutMs: 590_000 },
+  subagent_stop:     { timeoutMs: 30_000 },
+  teammate_idle:     { timeoutMs: 30_000 },
+  task_completed:    { timeoutMs: 30_000 },
+}
+
+function formatSyncResponse (event, response) {
+  if (!response || !response.behavior) {
+    return { stdout: null, stderr: null, exitCode: 0 }
+  }
+
+  // PermissionRequest: { decision: { behavior, message } }
+  if (event === 'permission_request') {
+    const decision = { behavior: response.behavior }
+    if (response.behavior === 'deny' && response.message) {
+      decision.message = response.message
+    }
+    return { stdout: JSON.stringify({ decision }), stderr: null, exitCode: 0 }
+  }
+
+  // SubagentStop: { decision: "block", reason: "..." }
+  if (event === 'subagent_stop') {
+    if (response.behavior === 'block') {
+      return {
+        stdout: JSON.stringify({ decision: 'block', reason: response.message || 'Continue from Claude Dock' }),
+        stderr: null,
+        exitCode: 0,
+      }
+    }
+    return { stdout: null, stderr: null, exitCode: 0 }
+  }
+
+  // TeammateIdle / TaskCompleted: exit code 2 + stderr to block
+  if (event === 'teammate_idle' || event === 'task_completed') {
+    if (response.behavior === 'block') {
+      return {
+        stdout: null,
+        stderr: response.message || 'Blocked from Claude Dock',
+        exitCode: 2,
+      }
+    }
+    return { stdout: null, stderr: null, exitCode: 0 }
+  }
+
+  return { stdout: null, stderr: null, exitCode: 0 }
+}
+
+async function runSyncHook () {
+  const event = argValue('--event') || process.env.CLAUDE_DOCK_EVENT || 'unknown'
+  const config = SYNC_HOOKS[event]
+  if (!config) return 0
+
+  let buf
+  try {
+    buf = fs.readFileSync(0)
+  } catch {
+    writeRuntimeDebug('sync_hook_stdin_failed', { event })
+    return 0
+  }
+
+  const inputBytes = buf.length
+  if (!inputBytes) {
+    writeRuntimeDebug('sync_hook_stdin_empty', { event })
+    return 0
+  }
+
+  const input = decodeHookInputBuffer(buf)
+  const data = safeJsonParse(input)
+  if (!data || typeof data !== 'object') {
+    writeRuntimeDebug('sync_hook_invalid_json', { event, input_bytes: inputBytes })
+    return 0
+  }
+
+  // Skip Stop/SubagentStop if already continuing from a stop hook (prevent loops)
+  if ((event === 'stop' || event === 'subagent_stop') && (data.stop_hook_active ?? data.stopHookActive)) {
+    writeRuntimeDebug('sync_hook_skip_active', { event })
+    return 0
+  }
+
+  // Extract fields (same logic as processPayload)
+  const cwd = pickString(data, ['cwd', ['workspace', 'current_dir'], ['workspace', 'currentDir'], ['workspace', 'cwd']])
+  const sessionId = pickString(data, ['session_id', 'sessionId', ['session', 'id'], ['session', 'session_id']])
+  const transcriptPath = pickString(data, ['transcript_path', 'transcriptPath', ['transcript', 'path']])
+  const title = pickString(data, ['title', ['workspace', 'title'], ['workspace', 'name']])
+  const toolName = pickString(data, ['tool_name', 'toolName', ['tool', 'name'], ['tool', 'tool_name']])
+  const message = pickString(data, ['message', ['notification', 'message']])
+  const permissionMode = pickString(data, ['permission_mode', 'permissionMode'])
+  const hookType = pickString(data, ['hook_type', 'hookType', ['hook', 'type']])
+  const toolInput = summarizeToolInput(data?.tool_input, toolName)
+  const taskSubject = pickString(data, ['task_subject', 'taskSubject'])
+  const teammateName = pickString(data, ['teammate_name', 'teammateName'])
+  const teamName = pickString(data, ['team_name', 'teamName'])
+  const subagentType = pickString(data, ['subagent_type', 'subagentType', 'agent_type', 'agentType'])
+  const sourceInfo = detectSource(data)
+  const tabbySession = (process.env.CLAUDE_DOCK_TABBY_SESSION || '').trim() || undefined
+  const terminalId = (process.env.CLAUDE_DOCK_TERMINAL_ID || '').trim() || undefined
+  const hostPid = Number(process.env.CLAUDE_DOCK_HOST_PID || process.ppid) || undefined
+  const requestId = crypto.randomUUID()
+  const eventId = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}`
+
+  const out = {
+    ts: Date.now(),
+    event,
+    event_id: eventId,
+    source: sourceInfo.source,
+    tabby_session: tabbySession,
+    terminal_id: terminalId,
+    host_pid: hostPid,
+    cwd,
+    session_id: sessionId,
+    title,
+    transcript_path: transcriptPath,
+    tool_name: toolName,
+    message,
+    permission_mode: permissionMode,
+    hook_type: hookType,
+    tool_input: toolInput || undefined,
+    task_subject: taskSubject || undefined,
+    teammate_name: teammateName || undefined,
+    team_name: teamName || undefined,
+    subagent_type: subagentType || undefined,
+    awaiting_response: true,
+    request_id: requestId,
+  }
+
+  writeRuntimeDebug('sync_hook_send', {
+    event,
+    request_id: requestId,
+    session_id: sessionId || null,
+    tool_name: toolName || null,
+    task_subject: taskSubject || null,
+  })
+
+  const response = await sendPermissionAndWait(out, config.timeoutMs)
+  const result = formatSyncResponse(event, response)
+
+  writeRuntimeDebug('sync_hook_result', {
+    event,
+    request_id: requestId,
+    behavior: response?.behavior || null,
+    exit_code: result.exitCode,
+  })
+
+  if (result.stdout) process.stdout.write(result.stdout + '\n')
+  if (result.stderr) process.stderr.write(result.stderr + '\n')
+  return result.exitCode
+}
+
 async function main () {
   if (process.argv.includes('--worker')) {
     return await runWorker()
+  }
+  const event = argValue('--event') || process.env.CLAUDE_DOCK_EVENT || 'unknown'
+  // Sync bidirectional hooks: hold TCP socket, wait for dashboard response
+  if (SYNC_HOOKS[event]) {
+    return await runSyncHook()
   }
   return await runDispatcher()
 }

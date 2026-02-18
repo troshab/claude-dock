@@ -21,7 +21,7 @@ function deployCCPlugin () {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
   const version = pkg.version || '0.1.0'
 
-  const cacheDir = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-dock', 'dock', version)
+  const cacheDir = path.join(CLAUDE_DIR, 'plugins', 'cache', 'dock', 'claude-dock', version)
 
   fs.mkdirSync(path.join(cacheDir, '.claude-plugin'), { recursive: true })
   fs.mkdirSync(path.join(cacheDir, 'hooks'), { recursive: true })
@@ -35,7 +35,7 @@ function deployCCPlugin () {
     path.join(cacheDir, 'hooks', 'hooks.json'),
   )
   fs.copyFileSync(
-    path.join(ROOT, 'bin', 'claude-dock-hook.js'),
+    path.join(ROOT, 'plugin', 'claude-dock-hook.js'),
     path.join(cacheDir, 'claude-dock-hook.js'),
   )
 
@@ -44,6 +44,28 @@ function deployCCPlugin () {
   if (fs.existsSync(orphan)) {
     fs.unlinkSync(orphan)
     console.log('Removed orphan marker')
+  }
+
+  // Register in installed_plugins.json so Claude Code treats it as installed
+  const installedPath = path.join(CLAUDE_DIR, 'plugins', 'installed_plugins.json')
+  try {
+    let installed = { version: 2, plugins: {} }
+    try { installed = JSON.parse(fs.readFileSync(installedPath, 'utf8')) } catch {}
+    const key = 'claude-dock@dock'
+    const entry = {
+      scope: 'user',
+      installPath: cacheDir.replace(/\//g, '\\'),
+      version,
+      installedAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+    }
+    const existing = installed.plugins[key]
+    if (!Array.isArray(existing) || existing[0]?.version !== version) {
+      installed.plugins[key] = [entry]
+      fs.writeFileSync(installedPath, JSON.stringify(installed, null, 2), 'utf8')
+    }
+  } catch (e) {
+    console.log(`Warning: could not update installed_plugins.json: ${e.message}`)
   }
 
   console.log(`Claude Code plugin deployed: ${cacheDir}`)
@@ -130,14 +152,11 @@ function copyDirSync (src, dest, exclude = []) {
   }
 }
 
-// --- 3. Register hooks in settings.json ---
+// --- 3. Register plugin in settings.json ---
+// Hooks are delivered via plugin/hooks/hooks.json (through enabledPlugins).
+// This function only ensures enabledPlugins key and cleans up legacy entries.
 
-function registerHooks () {
-  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-  const version = pkg.version || '0.1.0'
-  const hookScript = path.join(CLAUDE_DIR, 'plugins', 'cache', 'claude-dock', 'dock', version, 'claude-dock-hook.js')
-    .replace(/\\/g, '/')
-
+function registerPlugin () {
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
   if (!fs.existsSync(settingsPath)) return
 
@@ -145,109 +164,50 @@ function registerHooks () {
     const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')
     const settings = JSON.parse(raw)
 
-    // Remove old enabledPlugins entries
-    if (settings.enabledPlugins) {
-      delete settings.enabledPlugins['troshab@claude-code-zit']
-      delete settings.enabledPlugins['troshab@claude-dock']
-    }
-
-    if (!settings.hooks || typeof settings.hooks !== 'object') {
-      settings.hooks = {}
-    }
-
-    const hookEvents = {
-      SessionStart: 'session_start',
-      UserPromptSubmit: 'user_prompt',
-      PreToolUse: 'tool_start',
-      PostToolUse: 'tool_end',
-      PostToolUseFailure: 'tool_failure',
-      PermissionRequest: 'permission_request',
-      SubagentStart: 'subagent_start',
-      SubagentStop: 'subagent_stop',
-      Stop: 'stop',
-      Notification: 'notification',
-      TeammateIdle: 'teammate_idle',
-      TaskCompleted: 'task_completed',
-      PreCompact: 'pre_compact',
-      SessionEnd: 'session_end',
-    }
-
     let modified = false
 
-    // Remove old claude-code-zit hooks from settings.json
-    const events = Object.keys(hookEvents)
-    for (const eventName of events) {
-      const arr = settings.hooks[eventName]
-      if (!Array.isArray(arr)) continue
-      const filtered = arr.filter(matcherEntry => {
-        if (!Array.isArray(matcherEntry?.hooks)) return true
-        matcherEntry.hooks = matcherEntry.hooks.filter(h => {
-          const cmd = String(h?.command ?? '')
-          return !cmd.includes('claude-code-zit-hook')
-        })
-        return matcherEntry.hooks.length > 0
-      })
-      if (filtered.length !== arr.length) {
-        settings.hooks[eventName] = filtered
-        modified = true
-        console.log(`Removed old claude-code-zit hook from ${eventName}`)
-      }
+    // Ensure our plugin is listed in enabledPlugins
+    // Remove stale enabledPlugins key (old format)
+    if (settings.enabledPlugins?.['troshab@claude-dock']) {
+      delete settings.enabledPlugins['troshab@claude-dock']
+      modified = true
+    }
+    // Ensure correct enabledPlugins key (marketplace format: plugin@marketplace)
+    if (!settings.enabledPlugins) settings.enabledPlugins = {}
+    if (!settings.enabledPlugins['claude-dock@dock']) {
+      settings.enabledPlugins['claude-dock@dock'] = true
+      modified = true
     }
 
-    // Events that use synchronous bidirectional hooks (no async, no short timeout)
-    const syncEvents = new Set(['PermissionRequest', 'SubagentStop', 'TeammateIdle', 'TaskCompleted'])
-
-    for (const [eventName, eventArg] of Object.entries(hookEvents)) {
-      if (!Array.isArray(settings.hooks[eventName])) {
-        settings.hooks[eventName] = []
-      }
-
-      // Check if our hook is already registered
-      const existingIdx = settings.hooks[eventName].findIndex(entry =>
-        Array.isArray(entry?.hooks) && entry.hooks.some(h =>
-          String(h?.command ?? '').includes('claude-dock-hook')
-        )
-      )
-
-      if (existingIdx >= 0) {
-        // Fix existing sync event hooks: remove async/timeout if present
-        if (syncEvents.has(eventName)) {
-          const entry = settings.hooks[eventName][existingIdx]
-          for (const h of (entry?.hooks ?? [])) {
-            if (!String(h?.command ?? '').includes('claude-dock-hook')) continue
-            if (h.async !== undefined || h.timeout !== undefined) {
-              delete h.async
-              delete h.timeout
-              modified = true
-              console.log(`Fixed ${eventName} hook: removed async/timeout for sync mode`)
-            }
-          }
+    // Remove any leftover claude-dock hooks from settings.json (migrated to plugin hooks.json)
+    if (settings.hooks && typeof settings.hooks === 'object') {
+      for (const eventName of Object.keys(settings.hooks)) {
+        const arr = settings.hooks[eventName]
+        if (!Array.isArray(arr)) continue
+        const filtered = arr.filter(matcherEntry => {
+          if (!Array.isArray(matcherEntry?.hooks)) return true
+          matcherEntry.hooks = matcherEntry.hooks.filter(h => {
+            const cmd = String(h?.command ?? '')
+            return !cmd.includes('claude-dock-hook') && !cmd.includes('claude-code-zit-hook')
+          })
+          return matcherEntry.hooks.length > 0
+        })
+        if (filtered.length !== arr.length) {
+          settings.hooks[eventName] = filtered.length ? filtered : undefined
+          if (!filtered.length) delete settings.hooks[eventName]
+          modified = true
+          console.log(`Removed legacy hook from ${eventName}`)
         }
-        continue
       }
-
-      const hookEntry = {
-        type: 'command',
-        command: `node "${hookScript}" -- --hook --event ${eventArg}`,
-      }
-      // Async events get a timeout; sync events (PermissionRequest) use default 600s
-      if (!syncEvents.has(eventName)) {
-        hookEntry.timeout = 10000
-      }
-
-      settings.hooks[eventName].push({
-        hooks: [hookEntry],
-      })
-      modified = true
     }
 
     if (modified) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       fs.copyFileSync(settingsPath, `${settingsPath}.bak-${ts}`)
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
-      console.log('Hooks registered in settings.json')
+      console.log('Settings updated')
     } else {
-      console.log('Hooks already registered in settings.json')
+      console.log('Settings already up to date')
     }
   } catch (e) {
     console.log(`Warning: could not update settings.json: ${e.message}`)
@@ -317,10 +277,11 @@ function cleanupLegacy () {
 
 try {
   deployCCPlugin()
-  registerHooks()
+  registerPlugin()
   cleanupLegacy()
   linkTabbyPlugin()
   console.log('\nDone. Restart Claude Code + Tabby to activate.')
+  process.exit(0)
 } catch (e) {
   console.error(`Install failed: ${e.message}`)
   process.exit(1)

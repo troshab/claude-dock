@@ -237,7 +237,7 @@ async function main () {
         // Realistic hook states showcasing ALL interactive features.
         // Each session is densely populated - fewer sessions, more detail per session.
         const hookStates = [
-          // 0: SHOWCASE - bypass + agent team + subagent todos (waiting: agent asked question)
+          // 0: SHOWCASE - Docker + bypass + agent team + subagent todos (waiting: agent asked question)
           { status: 'waiting', title: 'Full-stack auth + RBAC',
             activeSubagents: 3, lastSubagentType: 'builder',
             currentActivity: null,
@@ -245,6 +245,7 @@ async function main () {
             lastPrompt: 'Implement full authentication system with role-based access control. Use JWT, add admin/user roles, guard all API routes.',
             lastError: null, isInterrupt: false,
             permissionPending: null, lastFailedTool: null,
+            isDocker: true, mountClaudeDir: true, forwardPorts: [3000, 5432],
             subagentTranscripts: [
               { type: 'builder', path: home + '/.claude/projects/auth/subagent-builder-1.jsonl' },
               { type: 'reviewer', path: home + '/.claude/projects/auth/subagent-reviewer-1.jsonl' },
@@ -486,6 +487,10 @@ async function main () {
             lastToolResponse: hs.lastToolResponse || undefined,
             taskDescription: hs.taskDescription || undefined,
             subagentTranscripts: hs.subagentTranscripts || undefined,
+            // Docker environment labels
+            isDocker: hs.isDocker || undefined,
+            mountClaudeDir: hs.mountClaudeDir || undefined,
+            forwardPorts: hs.forwardPorts || undefined,
           });
         }
 

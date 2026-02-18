@@ -8,6 +8,7 @@ Semantic versioning: `MAJOR.MINOR.PATCH`.
 
 Version is pinned in these locations (all must be updated together):
 - `package.json` `version`
+- `.claude-plugin/marketplace.json` plugins[0].version
 - `plugin/.claude-plugin/plugin.json` `version`
 - `src/config.ts` `defaultDockerImage` tag
 - `src/components/dashboardTab.component.ts` image placeholder and fallback

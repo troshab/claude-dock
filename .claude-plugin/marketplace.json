@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dock",
+  "description": "Claude Code event dashboard and workspace manager for Tabby terminal",
+  "owner": {
+    "name": "trosha_b"
+  },
+  "plugins": [
+    {
+      "name": "claude-dock",
+      "source": "./plugin",
+      "description": "Claude Code event logger - forwards hook events to Tabby dashboard via TCP transport",
+      "version": "1.0.0",
+      "author": { "name": "trosha_b" },
+      "category": "development",
+      "homepage": "https://github.com/troshab/claude-dock",
+      "repository": "https://github.com/troshab/claude-dock",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "keywords": ["dashboard", "hooks", "tabby", "monitoring"]
+    }
+  ]
+}

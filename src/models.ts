@@ -173,6 +173,12 @@ export interface ClaudeSession {
   taskDescription?: string
   /** Permission mode: default/plan/acceptEdits/dontAsk/bypassPermissions. */
   permissionMode?: string
+  /** Whether this session runs inside a Docker container. */
+  isDocker?: boolean
+  /** Whether ~/.claude is bind-mounted into the container. */
+  mountClaudeDir?: boolean
+  /** Ports forwarded from container to host. */
+  forwardPorts?: number[]
 }
 
 export interface UsageSummary {

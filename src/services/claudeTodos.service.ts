@@ -180,14 +180,14 @@ export class ClaudeTodosService {
       const text = buf.toString('utf8')
       const lines = text.split(/\r?\n/g).map(l => l.trim()).filter(Boolean)
 
-      // Try legacy TodoWrite first (last occurrence wins)
+      // Try legacy TodoWrite first (last non-empty occurrence wins)
       for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i]
         if (!line.includes('TodoWrite') && !line.includes('"todos"')) continue
         const obj = safeJsonParse<any>(line)
         if (!obj) continue
         const todos = this.findTodoWriteList(obj)
-        if (!todos) continue
+        if (!todos || !todos.length) continue
         return this.normalizeTodoWriteList(todos)
       }
 

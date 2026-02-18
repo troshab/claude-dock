@@ -161,6 +161,9 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
               <span class="font-weight-bold" *ngIf="!flat">{{ sessionLabel(s, true) }}</span>
               <button type="button" class="btn btn-sm btn-success cd-switch-btn" (click)="openWorkspaceForSession(s)" title="Switch to workspace">Switch</button>
               <span class="cd-model-label" *ngIf="s.model" [title]="s.model">{{ shortModel(s.model) }}</span>
+              <span class="cd-env-label cd-env-docker" *ngIf="sessionEnv(s).isDocker">Docker</span>
+              <span class="cd-env-label" *ngIf="sessionEnv(s).mountClaudeDir">~/.claude</span>
+              <span class="cd-env-label" *ngIf="sessionEnv(s).forwardPorts.length">{{ sessionEnv(s).forwardPorts.join(', ') }}</span>
               <span class="cd-bypass-label" *ngIf="s.permissionMode === 'bypassPermissions' || s.permissionMode === 'dangerouslySkipPermissions'">--dangerouslySkipPermissions</span>
             </div>
             <div class="cd-row-right">
@@ -271,15 +274,12 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
             <span *ngIf="s.compactCount" class="cd-meta-item">{{ s.compactCount }}x {{ s.compactTrigger || 'compact' }}</span>
             <span *ngIf="s.teammateIdle" class="cd-meta-item">{{ s.teammateName || 'teammate' }} idle<span *ngIf="s.teamName" class="cd-meta-detail"> ({{ s.teamName }})</span></span>
             <span *ngIf="s.agentType" class="cd-meta-item">agent: {{ s.agentType }}</span>
-            <span *ngIf="s.permissionMode && s.permissionMode !== 'default'" class="cd-meta-item">mode: {{ s.permissionMode }}</span>
             <span *ngIf="s.lastHookType" class="cd-meta-item">hook: {{ s.lastHookType }}</span>
           </div>
 
-          <!-- Footer: tool, timing, runtime -->
-          <div class="cd-row-bottom">
-            <span class="text-muted small" *ngIf="s.lastToolName">tool: {{ s.lastToolName }}</span>
-            <span class="text-muted small" *ngIf="s.lastEventTs">last: {{ age(s.lastEventTs) }}</span>
-            <span class="text-muted small" *ngIf="s.waitingSinceTs && s.status === 'waiting'">waiting: {{ age(s.waitingSinceTs) }}</span>
+          <!-- Footer: timing, runtime -->
+          <div class="cd-row-bottom" *ngIf="s.startTs || runtimeLabel(s)">
+            <span class="text-muted small" *ngIf="s.startTs">started: {{ age(s.startTs) }}</span>
             <span class="text-muted small" *ngIf="runtimeLabel(s)">{{ runtimeLabel(s) }}</span>
           </div>
         </div>
@@ -470,6 +470,8 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-switch-btn { padding: 0 var(--cd-gap-xs); font-size: 0.75em; line-height: 1.4; }
     .cd-flat-title { font-size: 0.82em; opacity: var(--cd-opacity-dim); white-space: nowrap; }
     .cd-model-label { font-family: var(--cd-font-mono); font-size: 0.78em; opacity: .5; }
+    .cd-env-label { font-family: var(--cd-font-mono); font-size: 0.75em; opacity: .55; }
+    .cd-env-docker { color: #3498db; opacity: .8; }
     .cd-bypass-label { font-family: var(--cd-font-mono); font-size: 0.75em; color: var(--cd-red); opacity: .8; }
     .cd-activity { font-family: var(--cd-font-mono); font-size: 0.88em; color: var(--cd-green); opacity: .95; padding: var(--cd-gap-micro) 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cd-alert-error { font-size: 0.88em; color: var(--cd-red); padding: var(--cd-gap-xs) var(--cd-gap-sm); border-left: 3px solid var(--cd-red); margin: var(--cd-gap-micro) 0; }
@@ -520,7 +522,9 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
       opacity: 1;
     }
     .cd-todo-dot.completed {
-      opacity: 0.35;
+      background: var(--cd-green);
+      border-color: var(--cd-green);
+      opacity: 0.4;
     }
     .cd-todo-text.done { text-decoration: line-through; opacity: var(--cd-opacity-dim); }
     .cd-tool-response { font-family: var(--cd-font-mono); font-size: 0.78em; opacity: .5; white-space: pre-wrap; word-break: break-all; max-height: 3.2em; overflow: hidden; margin: var(--cd-gap-micro) 0; }
@@ -901,12 +905,19 @@ export class DashboardTabComponent extends BaseTabComponent {
     }
   }
 
+  sessionEnv (s: ClaudeSession): { isDocker: boolean, mountClaudeDir: boolean, forwardPorts: number[] } {
+    if (s.isDocker !== undefined) {
+      return { isDocker: s.isDocker, mountClaudeDir: !!s.mountClaudeDir, forwardPorts: s.forwardPorts || [] }
+    }
+    const ws = s.cwd ? this.workspacesSvc.findByCwd(s.cwd) : undefined
+    if (!ws) return { isDocker: false, mountClaudeDir: false, forwardPorts: [] }
+    return { isDocker: !!ws.useDockerSandbox, mountClaudeDir: !!ws.mountClaudeDir, forwardPorts: ws.forwardPorts || [] }
+  }
+
   hasMetaInfo (s: ClaudeSession): boolean {
     return !!(
       s.activeSubagents || s.tasksCompleted || s.compactCount ||
-      s.teammateIdle || s.agentType ||
-      (s.permissionMode && s.permissionMode !== 'default') ||
-      s.lastHookType
+      s.teammateIdle || s.agentType || s.lastHookType
     )
   }
 

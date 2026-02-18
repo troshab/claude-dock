@@ -789,6 +789,12 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         dockerArgs.push('-v', `${tmpProjects}:/home/agent/.claude/projects`)
       }
 
+      // Git: mount SSH keys and gitconfig so git works inside the container.
+      const sshDir = path.join(home, '.ssh')
+      const gitconfigFile = path.join(home, '.gitconfig')
+      try { if (fsSync.statSync(sshDir).isDirectory()) dockerArgs.push('-v', `${sshDir}:/home/agent/.ssh:ro`) } catch {}
+      try { if (fsSync.statSync(gitconfigFile).isFile()) dockerArgs.push('-v', `${gitconfigFile}:/home/agent/.gitconfig:ro`) } catch {}
+
       dockerArgs.push(this.effectiveDockerImage, 'claude', ...allArgs)
 
       const resolved = await resolveForPty('docker', dockerArgs)

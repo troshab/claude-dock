@@ -2,8 +2,9 @@
 /**
  * Uninstall claude-dock:
  * 1. Remove Claude Code plugin from cache
- * 2. Remove Tabby plugin link/copy
- * 3. Clean up legacy artifacts from settings.json
+ * 2. Remove from enabledPlugins in settings.json
+ * 3. Remove Tabby plugin link/copy
+ * 4. Clean up legacy artifacts from settings.json
  */
 
 const fs = require('fs')
@@ -15,12 +16,43 @@ const CLAUDE_DIR = path.join(HOME, '.claude')
 
 function removeCCPlugin () {
   // Remove both old and new plugin cache dirs
-  for (const name of ['claude-dock', 'claude-code-zit']) {
+  for (const name of ['claude-dock', 'claude-code-zit', 'troshab-claude-code', 'troshab-kit']) {
     const pluginBase = path.join(CLAUDE_DIR, 'plugins', 'cache', name)
     if (fs.existsSync(pluginBase)) {
       fs.rmSync(pluginBase, { recursive: true, force: true })
       console.log(`Removed Claude Code plugin: ${pluginBase}`)
     }
+  }
+}
+
+function unregisterPlugin () {
+  const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
+  if (!fs.existsSync(settingsPath)) return
+
+  try {
+    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')
+    const settings = JSON.parse(raw)
+    if (!settings.enabledPlugins) return
+
+    let modified = false
+    const keysToRemove = [
+      'claude-dock@claude-dock',
+      'troshab@troshab-claude-code',
+      'troshab@troshab-kit',
+    ]
+    for (const key of keysToRemove) {
+      if (settings.enabledPlugins[key] !== undefined) {
+        delete settings.enabledPlugins[key]
+        modified = true
+        console.log(`Removed from enabledPlugins: ${key}`)
+      }
+    }
+
+    if (modified) {
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+    }
+  } catch (e) {
+    console.log(`Warning: could not update settings.json: ${e.message}`)
   }
 }
 
@@ -61,7 +93,7 @@ function cleanupLegacy () {
     }
   }
 
-  // Remove claude-dock and claude-code-zit entries from settings.json
+  // Remove claude-dock and claude-code-zit hook entries from settings.json
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
   if (!fs.existsSync(settingsPath)) return
 
@@ -71,9 +103,7 @@ function cleanupLegacy () {
     if (!settings.hooks || typeof settings.hooks !== 'object') return
 
     let modified = false
-    const events = ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification', 'SessionEnd']
-
-    for (const eventName of events) {
+    for (const eventName of Object.keys(settings.hooks)) {
       const arr = settings.hooks[eventName]
       if (!Array.isArray(arr)) continue
 
@@ -93,8 +123,6 @@ function cleanupLegacy () {
     }
 
     if (modified) {
-      const ts = new Date().toISOString().replace(/[:.]/g, '-')
-      fs.copyFileSync(settingsPath, `${settingsPath}.bak-${ts}`)
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
       console.log('Cleaned hooks from settings.json')
     }
@@ -105,6 +133,7 @@ function cleanupLegacy () {
 
 try {
   removeCCPlugin()
+  unregisterPlugin()
   unlinkTabbyPlugin()
   cleanupLegacy()
   console.log('\nDone. claude-dock uninstalled.')

@@ -10,7 +10,7 @@
       "name": "claude-dock",
       "source": "./plugin",
       "description": "Claude Code event logger - forwards hook events to Tabby dashboard via TCP transport",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "author": { "name": "trosha_b" },
       "category": "development",
       "homepage": "https://github.com/troshab/claude-dock",

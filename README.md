@@ -8,9 +8,9 @@
 - Claude Code **sessions list** (working/waiting) driven by Claude hooks (realtime via TCP).
 - Claude **usage** panel (reads `~/.claude/stats-cache.json`).
 
-![Dashboard](claude-dock-screenshot-1.jpg)
+![Dashboard](https://raw.githubusercontent.com/troshab/claude-dock/main/claude-dock-screenshot-1.jpg)
 
-![Workspace](claude-dock-screenshot-2.jpg)
+![Workspace](https://raw.githubusercontent.com/troshab/claude-dock/main/claude-dock-screenshot-2.jpg)
 
 ## Install
 

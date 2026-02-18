@@ -643,7 +643,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   }
 
   get defaultDockerImage (): string {
-    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:1.0.0'
+    return (this.cfg as any).store?.claudeDock?.defaultDockerImage || 'ghcr.io/troshab/claude-dock:1.0.2'
   }
 
   get workspaceDockerImage (): string {

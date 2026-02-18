@@ -1,6 +1,6 @@
 {
   "name": "@troshab/claude-dock",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Pinned Claude Code dashboard + workspace tabs for Tabby",
   "main": "dist/index.js",
   "scripts": {

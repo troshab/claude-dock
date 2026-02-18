@@ -104,6 +104,7 @@ interface ResumeCandidate {
             (change)="toggleMountClaude($any($event.target).checked)">
           <span>Mount ~/.claude</span>
         </label>
+        <span class="cd-ws-hint" *ngIf="useDockerSandbox">~/.ssh + ~/.gitconfig auto-mounted (ro)</span>
         <label class="cd-ws-chk" [ngClass]="permsChkColor">
           <input type="checkbox" [checked]="skipPermissions"
             (change)="toggleSkipPermissions($any($event.target).checked)">
@@ -228,6 +229,7 @@ interface ResumeCandidate {
     }
     .cd-port-input::placeholder { opacity: .4; }
     .cd-port-hook { opacity: .35; font-size: 0.8em; font-style: italic; white-space: nowrap; }
+    .cd-ws-hint { opacity: .4; font-size: 0.8em; font-style: italic; white-space: nowrap; }
     .cd-ws-image-input {
       width: 260px; max-width: 100%; padding: var(--cd-gap-micro) var(--cd-gap-xs);
       background: transparent; border: 1px solid var(--cd-border-light);
@@ -1311,6 +1313,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       const baseEnv = { ...(profile?.options?.env ?? {}) }
       const env = cleanEnv(baseEnv, {
         COLORTERM: 'truecolor',
+        CLAUDE_DOCK_SOURCE: 'tabby',
         CLAUDE_DOCK_TABBY_SESSION: this.debug.sessionId,
         CLAUDE_DOCK_TERMINAL_ID: terminalId,
       })

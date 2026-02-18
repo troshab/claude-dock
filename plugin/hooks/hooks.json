@@ -1,12 +1,12 @@
 {
-  "description": "claude-dock event forwarding hooks",
+  "description": "claude-dock event forwarding hooks (env guard: CLAUDE_DOCK_SOURCE)",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event session_start",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event session_start",
             "async": true
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event user_prompt",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event user_prompt",
             "async": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_start",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_start",
             "async": true
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_end",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_end",
             "async": true
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_failure",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event tool_failure",
             "async": true
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event permission_request"
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event permission_request"
           }
         ]
       }
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event subagent_start",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event subagent_start",
             "async": true
           }
         ]
@@ -82,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event subagent_stop"
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event subagent_stop"
           }
         ]
       }
@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event stop",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event stop",
             "async": true
           }
         ]
@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event notification",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event notification",
             "async": true
           }
         ]
@@ -114,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event task_completed"
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event task_completed"
           }
         ]
       }
@@ -124,7 +124,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event teammate_idle"
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event teammate_idle"
           }
         ]
       }
@@ -134,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event pre_compact",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event pre_compact",
             "async": true
           }
         ]
@@ -145,7 +145,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event session_end",
+            "command": "test -n \"$CLAUDE_DOCK_SOURCE\" && node \"${CLAUDE_PLUGIN_ROOT}/claude-dock-hook.js\" -- --hook --event session_end",
             "async": true
           }
         ]

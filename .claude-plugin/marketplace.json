@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "dock",
+  "name": "claude-dock",
   "description": "Claude Code event dashboard and workspace manager for Tabby terminal",
   "owner": {
     "name": "trosha_b"

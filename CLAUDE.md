@@ -18,8 +18,9 @@ Docker image tag matches the package version: `ghcr.io/troshab/claude-dock:1.0.0
 GitHub Actions workflow (`.github/workflows/docker.yml`) builds and pushes to ghcr.io
 on git tags matching `v*` (e.g., `git tag v1.0.0 && git push --tags`).
 
-After bumping version, run `npm install --package-lock-only` to sync package-lock.json,
-then the install script will deploy the hook to `~/.claude/plugins/cache/claude-dock/dock/<version>/`.
+After bumping version, run `npm install --package-lock-only` to sync package-lock.json.
+The Claude Code plugin is installed via marketplace: `claude plugin install --from github.com/troshab/claude-dock`
+(deploys to `~/.claude/plugins/cache/claude-dock/claude-dock/<version>/`).
 
 ## Known issues — embedded terminals
 
@@ -416,5 +417,6 @@ powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContin
 ## Plugin system — orphaning and enabledPlugins
 
 Claude Code orphans plugins in `~/.claude/plugins/cache/` that are not listed in
-`settings.json` `enabledPlugins`. The install script must add the plugin key
-(`troshab@claude-dock`) to `enabledPlugins` and remove `.orphaned_at` markers.
+`settings.json` `enabledPlugins`. Marketplace install (`claude plugin install --from ...`)
+registers the key `claude-dock@claude-dock` in `enabledPlugins` automatically.
+The Docker entrypoint removes `.orphaned_at` markers on startup as a safety net.

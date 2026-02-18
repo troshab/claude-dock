@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Single install script for claude-dock:
- * 1. Deploy Claude Code plugin (hooks) to ~/.claude/plugins/cache/
- * 2. Link Tabby plugin into Tabby plugins dir
- * 3. Register hooks in settings.json
- * 4. Clean up legacy install artifacts (including old claude-code-zit paths)
+ * Install script for claude-dock (Tabby side only):
+ * 1. Link Tabby plugin into Tabby plugins dir
+ * 2. Clean up legacy settings.json hooks
+ * 3. Clean up legacy install artifacts (old claude-code-zit paths)
+ *
+ * The Claude Code plugin (hooks) is installed via marketplace:
+ *   claude plugin install --from github.com/troshab/claude-dock
  */
 
 const fs = require('fs')
@@ -15,63 +17,7 @@ const ROOT = path.resolve(__dirname, '..')
 const HOME = os.homedir()
 const CLAUDE_DIR = path.join(HOME, '.claude')
 
-// --- 1. Deploy Claude Code plugin ---
-
-function deployCCPlugin () {
-  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-  const version = pkg.version || '0.1.0'
-
-  const cacheDir = path.join(CLAUDE_DIR, 'plugins', 'cache', 'dock', 'claude-dock', version)
-
-  fs.mkdirSync(path.join(cacheDir, '.claude-plugin'), { recursive: true })
-  fs.mkdirSync(path.join(cacheDir, 'hooks'), { recursive: true })
-
-  fs.copyFileSync(
-    path.join(ROOT, 'plugin', '.claude-plugin', 'plugin.json'),
-    path.join(cacheDir, '.claude-plugin', 'plugin.json'),
-  )
-  fs.copyFileSync(
-    path.join(ROOT, 'plugin', 'hooks', 'hooks.json'),
-    path.join(cacheDir, 'hooks', 'hooks.json'),
-  )
-  fs.copyFileSync(
-    path.join(ROOT, 'plugin', 'claude-dock-hook.js'),
-    path.join(cacheDir, 'claude-dock-hook.js'),
-  )
-
-  // Remove orphan marker if present
-  const orphan = path.join(cacheDir, '.orphaned_at')
-  if (fs.existsSync(orphan)) {
-    fs.unlinkSync(orphan)
-    console.log('Removed orphan marker')
-  }
-
-  // Register in installed_plugins.json so Claude Code treats it as installed
-  const installedPath = path.join(CLAUDE_DIR, 'plugins', 'installed_plugins.json')
-  try {
-    let installed = { version: 2, plugins: {} }
-    try { installed = JSON.parse(fs.readFileSync(installedPath, 'utf8')) } catch {}
-    const key = 'claude-dock@dock'
-    const entry = {
-      scope: 'user',
-      installPath: cacheDir.replace(/\//g, '\\'),
-      version,
-      installedAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-    }
-    const existing = installed.plugins[key]
-    if (!Array.isArray(existing) || existing[0]?.version !== version) {
-      installed.plugins[key] = [entry]
-      fs.writeFileSync(installedPath, JSON.stringify(installed, null, 2), 'utf8')
-    }
-  } catch (e) {
-    console.log(`Warning: could not update installed_plugins.json: ${e.message}`)
-  }
-
-  console.log(`Claude Code plugin deployed: ${cacheDir}`)
-}
-
-// --- 2. Link Tabby plugin ---
+// --- 1. Link Tabby plugin ---
 
 function linkTabbyPlugin () {
   const appData = process.env.APPDATA
@@ -128,15 +74,6 @@ function linkTabbyPlugin () {
   }
 }
 
-function isJunction (p) {
-  try {
-    const stat = fs.lstatSync(p)
-    return stat.isSymbolicLink()
-  } catch {
-    return false
-  }
-}
-
 function copyDirSync (src, dest, exclude = []) {
   fs.mkdirSync(dest, { recursive: true })
   for (const entry of fs.readdirSync(src)) {
@@ -152,11 +89,11 @@ function copyDirSync (src, dest, exclude = []) {
   }
 }
 
-// --- 3. Register plugin in settings.json ---
-// Hooks are delivered via plugin/hooks/hooks.json (through enabledPlugins).
-// This function only ensures enabledPlugins key and cleans up legacy entries.
+// --- 2. Clean up legacy settings.json hooks ---
+// Hooks are delivered via marketplace plugin (plugin/hooks/hooks.json).
+// This function only removes legacy hook entries from settings.json.
 
-function registerPlugin () {
+function cleanupSettingsHooks () {
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
   if (!fs.existsSync(settingsPath)) return
 
@@ -165,19 +102,6 @@ function registerPlugin () {
     const settings = JSON.parse(raw)
 
     let modified = false
-
-    // Ensure our plugin is listed in enabledPlugins
-    // Remove stale enabledPlugins key (old format)
-    if (settings.enabledPlugins?.['troshab@claude-dock']) {
-      delete settings.enabledPlugins['troshab@claude-dock']
-      modified = true
-    }
-    // Ensure correct enabledPlugins key (marketplace format: plugin@marketplace)
-    if (!settings.enabledPlugins) settings.enabledPlugins = {}
-    if (!settings.enabledPlugins['claude-dock@dock']) {
-      settings.enabledPlugins['claude-dock@dock'] = true
-      modified = true
-    }
 
     // Remove any leftover claude-dock hooks from settings.json (migrated to plugin hooks.json)
     if (settings.hooks && typeof settings.hooks === 'object') {
@@ -214,7 +138,7 @@ function registerPlugin () {
   }
 }
 
-// --- 4. Clean up legacy files ---
+// --- 3. Clean up legacy files ---
 
 function cleanupLegacy () {
   const legacyFiles = [
@@ -276,11 +200,11 @@ function cleanupLegacy () {
 // --- Run ---
 
 try {
-  deployCCPlugin()
-  registerPlugin()
+  cleanupSettingsHooks()
   cleanupLegacy()
   linkTabbyPlugin()
-  console.log('\nDone. Restart Claude Code + Tabby to activate.')
+  console.log('\nDone. Restart Tabby to activate.')
+  console.log('Claude Code plugin: claude plugin install --from github.com/troshab/claude-dock')
   process.exit(0)
 } catch (e) {
   console.error(`Install failed: ${e.message}`)

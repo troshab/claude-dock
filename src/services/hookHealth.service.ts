@@ -16,7 +16,7 @@ export interface HookHealthStatus {
 }
 
 const PLUGIN_CACHE_BASE = 'claude-dock'
-const PLUGIN_NAME = 'dock'
+const PLUGIN_NAME = 'claude-dock'
 
 @Injectable({ providedIn: 'root' })
 export class HookHealthService {

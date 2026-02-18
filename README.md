@@ -14,13 +14,16 @@
 
 ## Install
 
+1. Install [Tabby terminal](https://github.com/Eugeny/tabby/releases/latest)
+2. Install the plugin:
+
 ```bash
 npm i -g @troshab/claude-dock
 ```
 
-This single command builds the plugin, deploys Claude Code hooks, and links into Tabby.
+This builds the plugin, deploys Claude Code hooks, and links into Tabby.
 
-Restart Tabby to activate.
+3. Restart Tabby to activate.
 
 ## What the install does
 

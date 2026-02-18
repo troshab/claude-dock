@@ -6,25 +6,43 @@ Semantic versioning: `MAJOR.MINOR.PATCH`.
 - **Minor** (1.0.9 -> 1.1.0): new features, non-breaking changes.
 - **Major** (1.x.y -> 2.0.0): breaking changes (config format, hook protocol, API).
 
-Version is pinned in these locations (all must be updated together):
+### npm version
+
+Pinned in these locations (all must be updated together):
 - `package.json` `version`
 - `.claude-plugin/marketplace.json` plugins[0].version
 - `plugin/.claude-plugin/plugin.json` `version`
+
+### Docker image version
+
+Pinned separately from npm version in these locations:
 - `src/config.ts` `defaultDockerImage` tag
 - `src/components/dashboardTab.component.ts` image placeholder and fallback
 - `src/components/workspaceTab.component.ts` image fallback
 
-Docker image tag matches the package version: `ghcr.io/troshab/claude-dock:<version>`.
-GitHub Actions workflow (`.github/workflows/docker.yml`) builds and pushes to ghcr.io
-on git tags matching `v*`.
+Docker images are built by GitHub Actions (`.github/workflows/docker.yml`) **only** when
+a git tag matching `v*` is pushed. npm releases do NOT automatically produce Docker images.
+The Docker image tag does not have to match the npm version -- only bump the Docker image
+tag when the Docker image itself changes (Dockerfile, entrypoint, base image).
+
+If a release changes only Tabby plugin code, hooks, or install scripts -- bump npm version
+only, leave Docker image references unchanged.
 
 ### Release checklist
 
-1. Bump version in all 6 locations listed above (search-replace old -> new).
+**npm-only release** (plugin code, hooks, install scripts):
+1. Bump npm version in the 3 locations above (search-replace old -> new).
 2. `npm install --package-lock-only` to sync package-lock.json.
 3. Commit, push.
-4. `git tag v<version> && git push --tags` -- triggers Docker image build on ghcr.io.
-5. `npm publish --access public` -- publishes to npm (requires OTP confirmation).
+4. `npm publish --access public` (requires OTP confirmation).
+
+**Docker release** (Dockerfile, entrypoint, base image changes):
+1. Bump Docker image tag in the 3 locations above.
+2. Optionally bump npm version too if there are plugin changes.
+3. `npm install --package-lock-only` if npm version changed.
+4. Commit, push.
+5. `git tag v<docker-version> && git push --tags` -- triggers image build on ghcr.io.
+6. `npm publish --access public` if npm version changed.
 
 ### Distribution
 

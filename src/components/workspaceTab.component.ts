@@ -871,6 +871,12 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         '-e', `CLAUDE_DOCK_TERMINAL_ID=${terminalId}`,
       ]
 
+      // On native Linux Docker Engine, host.docker.internal doesn't resolve by default.
+      // Docker Engine 20.10+ supports the host-gateway special string.
+      if (process.platform === 'linux') {
+        dockerArgs.push('--add-host=host.docker.internal:host-gateway')
+      }
+
       if (process.env.ANTHROPIC_API_KEY) {
         dockerArgs.push('-e', 'ANTHROPIC_API_KEY')
       }
@@ -891,7 +897,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
         // Minimal mount: temp dir for projects so we can read transcripts (todos) from the host.
         // Doesn't expose credentials or config, doesn't pollute host's ~/.claude/projects.
         const tmpProjects = path.join(os.tmpdir(), 'claude-dock', sandboxName, 'projects')
-        try { fsSync.mkdirSync(tmpProjects, { recursive: true }) } catch {}
+        try { await fsSync.promises.mkdir(tmpProjects, { recursive: true }) } catch {}
         dockerArgs.push('-v', `${tmpProjects}:/home/agent/.claude/projects`)
       }
 
@@ -900,7 +906,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       if (gitMode === 'gh-token' || gitMode === 'ssh-mount') {
         // Always mount gitconfig for user.name/email (entrypoint strips Windows-only keys).
         const gitconfigFile = path.join(home, '.gitconfig')
-        try { if (fsSync.statSync(gitconfigFile).isFile()) dockerArgs.push('-v', `${gitconfigFile}:/tmp/.gitconfig-host:ro`) } catch {}
+        try { if ((await fsSync.promises.stat(gitconfigFile)).isFile()) dockerArgs.push('-v', `${gitconfigFile}:/tmp/.gitconfig-host:ro`) } catch {}
       }
       if (gitMode === 'gh-token') {
         // Extract GH token from host keyring → gh CLI + git HTTPS auth inside container.
@@ -917,7 +923,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       if (gitMode === 'ssh-mount') {
         // Mount SSH keys to staging dir (entrypoint copies with fixed perms).
         const sshDir = path.join(home, '.ssh')
-        try { if (fsSync.statSync(sshDir).isDirectory()) dockerArgs.push('-v', `${sshDir}:/tmp/.ssh-host:ro`) } catch {}
+        try { if ((await fsSync.promises.stat(sshDir)).isDirectory()) dockerArgs.push('-v', `${sshDir}:/tmp/.ssh-host:ro`) } catch {}
       }
 
       dockerArgs.push(this.effectiveDockerImage, 'claude', ...allArgs)

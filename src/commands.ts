@@ -1,6 +1,7 @@
 import { Injectable, Injector } from '@angular/core'
 import { AppService, Command, CommandContext, CommandLocation, CommandProvider, ConfigService, NotificationsService, PlatformService } from 'tabby-core'
 
+import * as os from 'os'
 import * as path from 'path'
 
 import { WorkspacesService } from './services/workspaces.service'
@@ -186,7 +187,12 @@ export class ClaudeDockCommandProvider extends CommandProvider {
       locations: [CommandLocation.StartPage],
       weight: 50,
       run: async () => {
-        const p = path.join(process.env.APPDATA ?? '', 'tabby', 'plugins')
+        const home = os.homedir()
+        const p = process.platform === 'win32'
+          ? path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'tabby', 'plugins')
+          : process.platform === 'darwin'
+            ? path.join(home, 'Library', 'Application Support', 'tabby', 'plugins')
+            : path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'tabby', 'plugins')
         try {
           this.platform.openPath(p)
         } catch (e: any) {

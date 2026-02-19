@@ -14,6 +14,18 @@ const path = require('path')
 const HOME = os.homedir()
 const CLAUDE_DIR = path.join(HOME, '.claude')
 
+/** Resolve Tabby plugins directory for the current platform. */
+function tabbyPluginsDir () {
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming'), 'tabby', 'plugins')
+  }
+  if (process.platform === 'darwin') {
+    return path.join(HOME, 'Library', 'Application Support', 'tabby', 'plugins')
+  }
+  // Linux / FreeBSD
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'), 'tabby', 'plugins')
+}
+
 function removeCCPlugin () {
   // Remove both old and new plugin cache dirs
   for (const name of ['claude-dock', 'claude-code-zit', 'troshab-claude-code', 'troshab-kit']) {
@@ -57,12 +69,9 @@ function unregisterPlugin () {
 }
 
 function unlinkTabbyPlugin () {
-  const appData = process.env.APPDATA
-  if (!appData) return
-
   // Remove both old and new Tabby plugin dirs
   for (const name of ['tabby-claude-dock', 'tabby-claude-code-zit']) {
-    const dest = path.join(appData, 'tabby', 'plugins', 'node_modules', name)
+    const dest = path.join(tabbyPluginsDir(), 'node_modules', name)
     if (!fs.existsSync(dest)) continue
 
     try {

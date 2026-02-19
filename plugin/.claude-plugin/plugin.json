@@ -1,6 +1,6 @@
 {
   "name": "claude-dock",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Claude Code event logger - forwards hook events to transport and JSONL",
   "author": { "name": "trosha_b" }
 }

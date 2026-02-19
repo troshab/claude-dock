@@ -19,6 +19,18 @@ const PLUGIN_KEY = 'claude-dock@claude-dock'
 
 // --- helpers ---
 
+/** Resolve Tabby plugins directory for the current platform. */
+function tabbyPluginsDir () {
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming'), 'tabby', 'plugins')
+  }
+  if (process.platform === 'darwin') {
+    return path.join(HOME, 'Library', 'Application Support', 'tabby', 'plugins')
+  }
+  // Linux / FreeBSD
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'), 'tabby', 'plugins')
+}
+
 function copyDirSync (src, dest, exclude = []) {
   fs.mkdirSync(dest, { recursive: true })
   for (const entry of fs.readdirSync(src)) {
@@ -127,13 +139,7 @@ function registerPlugin () {
 // --- 3. Link Tabby plugin ---
 
 function linkTabbyPlugin () {
-  const appData = process.env.APPDATA
-  if (!appData) {
-    console.log('APPDATA not set — skipping Tabby link (not Windows?)')
-    return
-  }
-
-  const nodeModulesDir = path.join(appData, 'tabby', 'plugins', 'node_modules')
+  const nodeModulesDir = path.join(tabbyPluginsDir(), 'node_modules')
   const dest = path.join(nodeModulesDir, 'tabby-claude-dock')
 
   fs.mkdirSync(nodeModulesDir, { recursive: true })
@@ -168,12 +174,13 @@ function linkTabbyPlugin () {
     }
   }
 
-  // Create junction (no admin required on Windows)
+  // Create symlink: junction on Windows (no admin required), regular symlink on Unix
+  const symlinkType = process.platform === 'win32' ? 'junction' : 'dir'
   try {
-    fs.symlinkSync(ROOT, dest, 'junction')
+    fs.symlinkSync(ROOT, dest, symlinkType)
     console.log(`Tabby plugin linked: ${dest} -> ${ROOT}`)
   } catch (e) {
-    console.error(`Failed to create junction: ${e.message}`)
+    console.error(`Failed to create symlink: ${e.message}`)
     console.log('Falling back to copy...')
     copyDirSync(ROOT, dest, ['node_modules', '.git'])
     console.log(`Tabby plugin copied: ${dest}`)
@@ -251,21 +258,18 @@ function cleanupLegacy () {
   }
 
   // Remove old Tabby symlink
-  const appData = process.env.APPDATA
-  if (appData) {
-    const oldTabbyLink = path.join(appData, 'tabby', 'plugins', 'node_modules', 'tabby-claude-code-zit')
-    if (fs.existsSync(oldTabbyLink)) {
-      try {
-        const stat = fs.lstatSync(oldTabbyLink)
-        if (stat.isSymbolicLink()) {
-          fs.unlinkSync(oldTabbyLink)
-        } else {
-          fs.rmSync(oldTabbyLink, { recursive: true, force: true })
-        }
-        console.log(`Removed old Tabby plugin: ${oldTabbyLink}`)
-      } catch (e) {
-        console.log(`Warning: could not remove old Tabby plugin: ${e.message}`)
+  const oldTabbyLink = path.join(tabbyPluginsDir(), 'node_modules', 'tabby-claude-code-zit')
+  if (fs.existsSync(oldTabbyLink)) {
+    try {
+      const stat = fs.lstatSync(oldTabbyLink)
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(oldTabbyLink)
+      } else {
+        fs.rmSync(oldTabbyLink, { recursive: true, force: true })
       }
+      console.log(`Removed old Tabby plugin: ${oldTabbyLink}`)
+    } catch (e) {
+      console.log(`Warning: could not remove old Tabby plugin: ${e.message}`)
     }
   }
 

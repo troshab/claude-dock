@@ -162,7 +162,6 @@ function linkTabbyPlugin () {
         fs.rmSync(distDest, { recursive: true, force: true })
       }
       copyDirSync(path.join(ROOT, 'dist'), distDest)
-      copyDirSync(path.join(ROOT, 'bin'), path.join(dest, 'bin'))
       copyDirSync(path.join(ROOT, 'plugin'), path.join(dest, 'plugin'))
       console.log(`Tabby plugin updated: ${dest}`)
       return

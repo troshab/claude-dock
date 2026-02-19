@@ -410,6 +410,7 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   private promptCache = new Map<string, string>()
   private lastProjectDirMtimeMs = 0
   private cdQueued = false
+  private keylogCleanup: (() => void) | null = null
 
   /** Coalesce detectChanges via rAF: max 1 render per animation frame. */
   private scheduleCD (): void {
@@ -557,6 +558,75 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     // If a terminal was created before the view init (rare), mount it now.
     this.mountActiveTerminal()
     this.restoreTerminalState()
+    this.attachKeylog()
+  }
+
+  /**
+   * Debug keylogger: capture + bubble phase listeners on document.
+   * Writes to debug log FILE (survives Tabby close).
+   * Logs every key with minimal info, space with full diagnostics.
+   * Gated by CLAUDE_DOCK_DEBUG=1 or claudeDock.debugLogging.
+   */
+  private attachKeylog (): void {
+    if (this.keylogCleanup) return
+    const debugOn = !!(process.env.CLAUDE_DOCK_DEBUG === '1' || (this.cfg as any).store?.claudeDock?.debugLogging)
+    if (!debugOn) return
+
+    const wsId = this.workspaceId?.slice(0, 8) || '?'
+    const cleanups: (() => void)[] = []
+
+    const describeTarget = (el: HTMLElement | null): string => {
+      if (!el) return 'null'
+      const tag = el.tagName
+      const cls = el.className?.split?.(' ')?.[0] || ''
+      const isXterm = tag === 'TEXTAREA' && el.classList.contains('xterm-helper-textarea')
+      return isXterm ? 'XTERM' : `${tag}.${cls}`
+    }
+
+    const logKey = (phase: string, type: string, e: KeyboardEvent) => {
+      const target = describeTarget(e.target as HTMLElement)
+      const activeEl = describeTarget(document.activeElement as HTMLElement)
+      const isSpace = e.key === ' '
+
+      if (isSpace) {
+        // Full diagnostics for space
+        this.debug.log('keylog.space', {
+          ws: wsId, phase, type, target, activeEl,
+          prevented: e.defaultPrevented,
+          stopped: e.cancelBubble,
+          ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey,
+        })
+      } else if (e.key.length === 1 && phase === 'capture' && type === 'keydown') {
+        // Minimal log for printable keys -- capture/keydown only to reduce noise
+        this.debug.log('keylog.key', {
+          ws: wsId, key: e.key, target, activeEl,
+          prevented: e.defaultPrevented,
+        })
+      }
+    }
+
+    // Capture phase: fires FIRST, before any handler can block
+    const captureDown = (e: KeyboardEvent) => logKey('capture', 'keydown', e)
+    const captureUp = (e: KeyboardEvent) => { if (e.key === ' ') logKey('capture', 'keyup', e) }
+
+    // Bubble phase: fires LAST -- if event survived, prevented/stopped may have changed
+    const bubbleDown = (e: KeyboardEvent) => { if (e.key === ' ') logKey('bubble', 'keydown', e) }
+    const bubbleUp = (e: KeyboardEvent) => { if (e.key === ' ') logKey('bubble', 'keyup', e) }
+
+    document.addEventListener('keydown', captureDown, true)
+    document.addEventListener('keyup', captureUp, true)
+    document.addEventListener('keydown', bubbleDown, false)
+    document.addEventListener('keyup', bubbleUp, false)
+
+    cleanups.push(
+      () => document.removeEventListener('keydown', captureDown, true),
+      () => document.removeEventListener('keyup', captureUp, true),
+      () => document.removeEventListener('keydown', bubbleDown, false),
+      () => document.removeEventListener('keyup', bubbleUp, false),
+    )
+
+    this.keylogCleanup = () => cleanups.forEach(fn => fn())
+    this.debug.log('keylog.attached', { ws: wsId })
   }
 
   private loadWorkspace (): void {
@@ -806,9 +876,9 @@ export class WorkspaceTabComponent extends BaseTabComponent {
       }
 
       const ports = this.forwardPorts
-      if (ports.length) {
-        dockerArgs.push('-e', `CLAUDE_DOCK_FORWARD_PORTS=${ports.join(',')}`)
-      }
+      // Always forward daemon port so hooks inside Docker can reach the host daemon
+      const allPorts = ports.includes(19543) ? ports : [...ports, 19543]
+      dockerArgs.push('-e', `CLAUDE_DOCK_FORWARD_PORTS=${allPorts.join(',')}`)
 
       const home = os.homedir()
       if (this.mountClaudeDir) {
@@ -1066,13 +1136,13 @@ export class WorkspaceTabComponent extends BaseTabComponent {
     const target = event.target as HTMLElement | null
     if (!target) return
     const tag = target.tagName?.toUpperCase()
-    // Let buttons, inputs, selects handle their own keys
-    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-    // Prevent browser from interpreting space/keys as scroll/click inside the terminal host
-    if (event.key === ' ') {
+    // If the xterm textarea itself has focus, let xterm.js handle everything
+    if (tag === 'TEXTAREA' && target.classList.contains('xterm-helper-textarea')) return
+    // Prevent browser defaults: space->click on buttons, space->scroll on containers
+    if (event.key === ' ' || tag === 'BUTTON') {
       event.preventDefault()
     }
-    // Forward the keypress to the active terminal and refocus it
+    // Forward printable keys to the active terminal and refocus it
     const active = this.getActiveTerminal() as any
     if (active?.sendInput && event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
       active.sendInput(event.key)
@@ -1534,6 +1604,8 @@ export class WorkspaceTabComponent extends BaseTabComponent {
   }
 
   override destroy (skipDestroyedEvent?: boolean): void {
+    this.keylogCleanup?.()
+    this.keylogCleanup = null
     this.saveTerminalState()
     this.debug.log('workspace.tab.destroy', {
       workspace_id: this.workspaceId,

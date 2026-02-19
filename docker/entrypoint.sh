@@ -7,11 +7,12 @@ set -e
 # 1. Symlink ~/.claude so Windows-style paths in settings.json / plugins
 #    resolve inside the container (/DRIVE/Users/NAME/.claude -> /home/agent/.claude).
 # 2. Fix dangling symlinks left by docker sandbox run (settings.json, .claude.json).
-# 3. Remove .orphaned_at markers that Claude Code writes on first start.
-# 4. Copy SSH keys and gitconfig from staging mounts with fixed permissions.
-# 5. Configure git safe.directory for cross-UID bind mounts.
-# 6. Forward host ports to container localhost via socat.
-# 7. Exec into the requested command (claude / bash / ...).
+# 3. Convert installed_plugins.json Windows paths to container POSIX paths.
+# 4. Remove .orphaned_at markers that Claude Code writes on first start.
+# 5. Copy SSH keys and gitconfig from staging mounts with fixed permissions.
+# 6. Configure git safe.directory for cross-UID bind mounts.
+# 7. Forward host ports to container localhost via socat.
+# 8. Run the requested command (restore installed_plugins.json on exit).
 # ---------------------------------------------------------------------------
 
 CLAUDE_HOME="/home/agent/.claude"
@@ -20,13 +21,16 @@ CLAUDE_HOME="/home/agent/.claude"
 # Workspace is mounted at its original POSIX path (/DRIVE/Users/NAME/project).
 # ~/.claude is at /home/agent/.claude.  Config files reference the Windows-style
 # POSIX path - create a symlink so those resolve.
+# Note: --security-opt no-new-privileges blocks sudo; ln without sudo works only
+# if the parent directory is writable by agent.
 
 if [ -d "$CLAUDE_HOME" ]; then
   WS="${CLAUDE_DOCK_CWD:-$(pwd)}"
   if [[ "$WS" =~ ^/([a-zA-Z])/([Uu]sers/[^/]+) ]]; then
     WIN_HOME="/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
     if [ -d "$WIN_HOME" ] && [ ! -e "$WIN_HOME/.claude" ]; then
-      sudo ln -sf "$CLAUDE_HOME" "$WIN_HOME/.claude" 2>/dev/null || true
+      ln -sf "$CLAUDE_HOME" "$WIN_HOME/.claude" 2>/dev/null \
+        || sudo ln -sf "$CLAUDE_HOME" "$WIN_HOME/.claude" 2>/dev/null || true
     fi
   fi
 fi
@@ -61,10 +65,51 @@ for _f in "$CLAUDE_HOME/settings.json" "$HOME/.claude.json"; do
   fi
 done
 
-# --- 3. Clean orphan markers ---------------------------------------------------
+# --- 3. Convert plugin JSON paths for container -------------------------------
+# Host's installed_plugins.json and known_marketplaces.json have Windows paths
+# (C:\Users\NAME\.claude\...) that don't resolve on Linux. Convert to POSIX.
+# Originals are backed up to /tmp and restored on exit (see step 8).
+_INSTALLED="$CLAUDE_HOME/plugins/installed_plugins.json"
+_MARKETPLACES="$CLAUDE_HOME/plugins/known_marketplaces.json"
+_NEED_RESTORE=""
+
+_convert_win_paths() {
+  node -e '
+    const fs = require("fs"), home = process.argv[2];
+    function convert(p) {
+      const s = p.replace(/\\/g, "/");
+      const i = s.indexOf("/.claude/");
+      return i >= 0 ? home + s.slice(i + "/.claude".length) : s;
+    }
+    const f = process.argv[1];
+    const d = JSON.parse(fs.readFileSync(f, "utf8"));
+    if (d.plugins) {
+      for (const entries of Object.values(d.plugins)) {
+        for (const e of entries) {
+          if (e.installPath) e.installPath = convert(e.installPath);
+        }
+      }
+    } else {
+      for (const m of Object.values(d)) {
+        if (m.installLocation) m.installLocation = convert(m.installLocation);
+      }
+    }
+    fs.writeFileSync(f, JSON.stringify(d, null, 2));
+  ' "$1" "$CLAUDE_HOME" 2>/dev/null
+}
+
+for _pf in "$_INSTALLED" "$_MARKETPLACES"; do
+  if [ -f "$_pf" ] && grep -q '\\\\' "$_pf" 2>/dev/null; then
+    cp "$_pf" "/tmp/$(basename "$_pf").host-backup"
+    _convert_win_paths "$_pf" || true
+    _NEED_RESTORE=1
+  fi
+done
+
+# --- 4. Clean orphan markers ---------------------------------------------------
 find "$CLAUDE_HOME/plugins/cache" -name ".orphaned_at" -delete 2>/dev/null || true
 
-# --- 4. SSH keys: copy from staging mount with fixed permissions ---------------
+# --- 5. SSH keys: copy from staging mount with fixed permissions ---------------
 # Host mounts ~/.ssh as /tmp/.ssh-host:ro (Windows bind mounts produce 777 perms
 # which ssh rejects). Copy to /home/agent/.ssh with correct ownership and modes.
 if [ -d /tmp/.ssh-host ]; then
@@ -78,7 +123,7 @@ if [ -d /tmp/.ssh-host ]; then
   chmod 644 "$HOME/.ssh"/config 2>/dev/null || true
 fi
 
-# --- 5. Git config: copy from staging mount, clean up, set safe.directory ------
+# --- 6. Git config: copy from staging mount, clean up, set safe.directory ------
 # Host mounts ~/.gitconfig as /tmp/.gitconfig-host:ro.
 if [ -f /tmp/.gitconfig-host ]; then
   cp /tmp/.gitconfig-host "$HOME/.gitconfig" 2>/dev/null || true
@@ -104,7 +149,7 @@ if [ -n "$GH_TOKEN" ]; then
   fi
 fi
 
-# --- 6. Port forwarding --------------------------------------------------------
+# --- 7. Port forwarding --------------------------------------------------------
 # CLAUDE_DOCK_FORWARD_PORTS is a comma-separated list of ports (e.g. "3000,5173,8080").
 # Each port gets a socat background process forwarding container localhost -> host.
 if [ -n "$CLAUDE_DOCK_FORWARD_PORTS" ]; then
@@ -117,5 +162,26 @@ if [ -n "$CLAUDE_DOCK_FORWARD_PORTS" ]; then
   done
 fi
 
-# --- 7. Exec into main command -------------------------------------------------
-exec "$@"
+# --- 8. Run main command with installed_plugins.json restoration --------------
+# Cannot use exec: need to restore host's installed_plugins.json on exit
+# (the bind mount would keep the container-patched version on the host).
+_restore_plugin_files() {
+  for _pf in "$_INSTALLED" "$_MARKETPLACES"; do
+    local _bak="/tmp/$(basename "$_pf").host-backup"
+    [ -f "$_bak" ] && cp "$_bak" "$_pf" 2>/dev/null || true
+  done
+}
+
+if [ -n "$_NEED_RESTORE" ]; then
+  # Disable set -e so cleanup always runs regardless of child exit code
+  set +e
+  "$@" &
+  _CHILD=$!
+  trap '_restore_plugin_files; kill -TERM $_CHILD 2>/dev/null; wait $_CHILD 2>/dev/null; exit' TERM INT HUP
+  wait $_CHILD
+  _rc=$?
+  _restore_plugin_files
+  exit $_rc
+else
+  exec "$@"
+fi

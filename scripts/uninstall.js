@@ -131,7 +131,22 @@ function cleanupLegacy () {
   }
 }
 
+function killDaemon () {
+  const pidFile = path.join(HOME, '.claude', 'claude-dock', 'daemon.pid')
+  const portFile = path.join(HOME, '.claude', 'claude-dock', 'daemon.port')
+  try {
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim())
+    if (pid) {
+      try { process.kill(pid, 'SIGTERM') } catch {}
+      console.log(`Stopped daemon (PID ${pid})`)
+    }
+  } catch {}
+  try { fs.unlinkSync(pidFile) } catch {}
+  try { fs.unlinkSync(portFile) } catch {}
+}
+
 try {
+  killDaemon()
   removeCCPlugin()
   unregisterPlugin()
   unlinkTabbyPlugin()

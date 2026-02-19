@@ -347,6 +347,7 @@ import { WorkspaceTabComponent } from './workspaceTab.component'
     .cd-usage-bar {
       position: relative;
       height: var(--cd-bar-height);
+      min-width: 80px;
       border-radius: var(--cd-radius-pill);
       overflow: hidden;
       background: linear-gradient(90deg, var(--cd-green) 0%, var(--cd-green) 60%, var(--cd-yellow) 80%, var(--cd-red) 100%);

@@ -10,6 +10,7 @@ export interface HookHealthStatus {
   checkedAt: number
   pluginDir: string
   hookPath: string
+  daemonPath: string
   hooksJsonPath: string
   missingEvents: string[]
   notes: string[]
@@ -25,6 +26,7 @@ export class HookHealthService {
     checkedAt: Date.now(),
     pluginDir: '',
     hookPath: '',
+    daemonPath: '',
     hooksJsonPath: '',
     missingEvents: [],
     notes: ['Not checked yet'],
@@ -67,6 +69,7 @@ export class HookHealthService {
   async checkNow (): Promise<void> {
     const pluginDir = await this.findPluginDir()
     const hookPath = pluginDir ? path.join(pluginDir, 'claude-dock-hook.js') : ''
+    const daemonPath = pluginDir ? path.join(pluginDir, 'claude-dock-daemon.js') : ''
     const hooksJsonPath = pluginDir ? path.join(pluginDir, 'hooks', 'hooks.json') : ''
     const notes: string[] = []
 
@@ -75,16 +78,20 @@ export class HookHealthService {
     }
 
     let hookExists = false
+    let daemonExists = false
     let hooksJsonExists = false
     if (hookPath) {
       try { await fs.promises.stat(hookPath); hookExists = true } catch { }
+    }
+    if (daemonPath) {
+      try { await fs.promises.stat(daemonPath); daemonExists = true } catch { }
     }
     if (hooksJsonPath) {
       try { await fs.promises.stat(hooksJsonPath); hooksJsonExists = true } catch { }
     }
 
-    if (pluginDir && !hookExists) {
-      notes.push('Hook script missing from plugin')
+    if (pluginDir && !hookExists && !daemonExists) {
+      notes.push('Hook scripts missing from plugin')
     }
     if (pluginDir && !hooksJsonExists) {
       notes.push('hooks.json missing from plugin')
@@ -102,7 +109,7 @@ export class HookHealthService {
             const entryHooks = Array.isArray(entry?.hooks) ? entry.hooks : []
             return entryHooks.some((h: any) => {
               const cmd = String(h?.command ?? '')
-              return cmd.includes('claude-dock-hook.js')
+              return cmd.includes('claude-dock') || cmd.includes('dock-send') || cmd.includes('/dev/tcp/')
             })
           })
         })
@@ -115,12 +122,13 @@ export class HookHealthService {
       notes.push(`missing hook events: ${missingEvents.join(', ')}`)
     }
 
-    const ok = hookExists && hooksJsonExists && missingEvents.length === 0
+    const ok = (hookExists || daemonExists) && hooksJsonExists && missingEvents.length === 0
     this.status$.next({
       ok,
       checkedAt: Date.now(),
       pluginDir: pluginDir || '',
       hookPath,
+      daemonPath,
       hooksJsonPath,
       missingEvents,
       notes,

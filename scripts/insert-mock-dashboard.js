@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Inject mock sessions into the Claude Dock dashboard via Chrome DevTools Protocol.
-// Requires Tabby running with --remote-debugging-port=9222.
+// Requires Tabby running with --remote-debugging-port=9223.
 // Zero external dependencies - uses raw HTTP upgrade for WebSocket.
 //
 // Usage:
@@ -12,7 +12,7 @@ const http = require('http')
 const crypto = require('crypto')
 
 const CDP_HOST = '127.0.0.1'
-const CDP_PORT = 9222
+const CDP_PORT = 9223
 
 const sessionCount = process.argv[2] === 'clear' ? 0 : parseInt(process.argv[2], 10) || 12
 const projectCount = parseInt(process.argv[3], 10) || 4
@@ -158,7 +158,7 @@ async function main () {
   try {
     pages = await httpGet(`http://${CDP_HOST}:${CDP_PORT}/json`)
   } catch {
-    console.error('Cannot connect to CDP on port 9222. Is Tabby running with --remote-debugging-port=9222?')
+    console.error('Cannot connect to CDP on port 9223. Is Tabby running with --remote-debugging-port=9223?')
     process.exit(1)
   }
 

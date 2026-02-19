@@ -24,7 +24,6 @@
   "type": "commonjs",
   "files": [
     "dist",
-    "bin",
     "plugin",
     "scripts",
     "README.md"

@@ -257,6 +257,17 @@ Docker does not expand `~` in `-v` volume paths. `~/.claude:/home/agent/.claude`
 Rule: always use `path.join(os.homedir(), '.claude')` for absolute paths in Docker volume
 mounts, never `~`.
 
+### Cleanup when changing Docker setup
+
+When modifying Dockerfile, entrypoint, base image, or container configuration:
+1. Remove old/stale containers: `docker rm -f <name>` or `docker container prune`
+2. Remove old image versions: `docker rmi ghcr.io/troshab/claude-dock:<old-tag>`
+3. Remove unused base images that are no longer referenced
+4. Run `docker image prune` to clean dangling (untagged) images
+5. Verify the new image builds and starts correctly before committing
+
+Rule: never leave old image versions or stopped containers behind after a Docker change.
+
 ## Tabby config — defaults required for persistence
 
 Tabby's `ConfigService` deep-merges saved config with `ConfigProvider.defaults`. Keys not
@@ -406,7 +417,7 @@ Never modify source CSS before previewing in DevTools.
 
 Script: `node scripts/insert-mock-dashboard.js [sessions] [projects]`
 
-Connects to Tabby via CDP (port 9222), finds the DashboardTabComponent instance through
+Connects to Tabby via CDP (port 9223), finds the DashboardTabComponent instance through
 Angular's `ɵgetLContext`, patches `visibleRuntimeSessions()` and `todosFor()` with
 generated sessions and mock todos, and calls `recompute()`. Zero external dependencies.
 Every 3rd session gets 2-5 random todos with mixed statuses (pending/in_progress/completed).
@@ -431,12 +442,19 @@ To inspect the plugin live in Chrome DevTools (or via MCP debug-in-chrome-with-d
 launch Tabby with the remote debugging flag:
 
 ```bash
-~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222
+~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9223
 ```
 
-This enables Chrome DevTools Protocol on port 9222. Tabby always exposes exactly one page
-(`file:///...app.asar/dist/index.html`) -- skip `list_pages` and go straight to
-`take_screenshot`, `evaluate_script`, `take_snapshot` to inspect DOM and debug layout.
+Port 9223 (not 9222) because Chrome's own remote debugging occupies 9222.
+
+`.mcp.json` in the repo root configures the `tabby-devtools` MCP server pointing at
+`http://127.0.0.1:9223`. Tools are available as `mcp__tabby-devtools__*` (take_screenshot,
+evaluate_script, take_snapshot, etc.). The global `debug-in-chrome-with-devtools` server
+(port 9222) connects to Chrome, not Tabby.
+
+Tabby always exposes exactly one page (`file:///...app.asar/dist/index.html`) -- skip
+`list_pages` and go straight to `take_screenshot`, `evaluate_script`, `take_snapshot` to
+inspect DOM and debug layout.
 Use `@electron/remote` via `evaluate_script` to resize the window for responsive testing:
 `require('@electron/remote').getCurrentWindow().setSize(width, height)`.
 
@@ -444,8 +462,10 @@ Use `@electron/remote` via `evaluate_script` to resize the window for responsive
 and let the user run it. The user manages the Tabby process lifecycle manually.
 
 Restart command (give to user, do not execute):
-```bash
-powershell -Command "Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue"; sleep 2; ~/AppData/Local/Programs/Tabby/Tabby.exe --remote-debugging-port=9222 &
+```powershell
+Stop-Process -Name Tabby -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-Process "$env:LOCALAPPDATA\Programs\Tabby\Tabby.exe" -ArgumentList '--remote-debugging-port=9223'
 ```
 
 ## Plugin system — orphaning and enabledPlugins

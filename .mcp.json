@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "tabby-devtools": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@0.17.1",
+        "--browserUrl=http://127.0.0.1:9223",
+        "--no-usage-statistics",
+        "--no-performance-crux"
+      ]
+    }
+  }
+}

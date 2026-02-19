@@ -136,58 +136,7 @@ function registerPlugin () {
   }
 }
 
-// --- 3. Link Tabby plugin ---
-
-function linkTabbyPlugin () {
-  const nodeModulesDir = path.join(tabbyPluginsDir(), 'node_modules')
-  const dest = path.join(nodeModulesDir, 'tabby-claude-dock')
-
-  fs.mkdirSync(nodeModulesDir, { recursive: true })
-
-  // Check via lstat (does NOT follow symlinks) to detect broken junctions
-  let lstat
-  try { lstat = fs.lstatSync(dest) } catch { lstat = null }
-
-  if (lstat) {
-    if (lstat.isSymbolicLink()) {
-      // Junction or symlink — check if it points to current ROOT
-      let target
-      try { target = fs.realpathSync(dest) } catch { target = null }
-      if (target === fs.realpathSync(ROOT)) {
-        console.log(`Tabby plugin already linked: ${dest}`)
-        return
-      }
-      // Broken or stale junction — remove it
-      fs.unlinkSync(dest)
-      console.log(`Removed stale junction: ${dest}`)
-    } else if (lstat.isDirectory()) {
-      // Existing dir — update in place
-      fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dest, 'package.json'))
-      const distDest = path.join(dest, 'dist')
-      if (fs.existsSync(distDest)) {
-        fs.rmSync(distDest, { recursive: true, force: true })
-      }
-      copyDirSync(path.join(ROOT, 'dist'), distDest)
-      copyDirSync(path.join(ROOT, 'plugin'), path.join(dest, 'plugin'))
-      console.log(`Tabby plugin updated: ${dest}`)
-      return
-    }
-  }
-
-  // Create symlink: junction on Windows (no admin required), regular symlink on Unix
-  const symlinkType = process.platform === 'win32' ? 'junction' : 'dir'
-  try {
-    fs.symlinkSync(ROOT, dest, symlinkType)
-    console.log(`Tabby plugin linked: ${dest} -> ${ROOT}`)
-  } catch (e) {
-    console.error(`Failed to create symlink: ${e.message}`)
-    console.log('Falling back to copy...')
-    copyDirSync(ROOT, dest, ['node_modules', '.git'])
-    console.log(`Tabby plugin copied: ${dest}`)
-  }
-}
-
-// --- 4. Clean up legacy settings.json hooks ---
+// --- 3. Clean up legacy settings.json hooks ---
 
 function cleanupSettingsHooks () {
   const settingsPath = path.join(CLAUDE_DIR, 'settings.json')
@@ -293,8 +242,7 @@ try {
   cleanupLegacy()
   installClaudePlugin()
   registerPlugin()
-  linkTabbyPlugin()
-  console.log('\nDone. Restart Tabby to activate.')
+  console.log('\nDone. Install the Tabby plugin manually from Claude Code.')
   process.exit(0)
 } catch (e) {
   console.error(`Install failed: ${e.message}`)

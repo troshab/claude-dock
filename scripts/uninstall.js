@@ -14,18 +14,6 @@ const path = require('path')
 const HOME = os.homedir()
 const CLAUDE_DIR = path.join(HOME, '.claude')
 
-/** Resolve Tabby plugins directory for the current platform. */
-function tabbyPluginsDir () {
-  if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming'), 'tabby', 'plugins')
-  }
-  if (process.platform === 'darwin') {
-    return path.join(HOME, 'Library', 'Application Support', 'tabby', 'plugins')
-  }
-  // Linux / FreeBSD
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'), 'tabby', 'plugins')
-}
-
 function removeCCPlugin () {
   // Remove both old and new plugin cache dirs
   for (const name of ['claude-dock', 'claude-code-zit', 'troshab-claude-code', 'troshab-kit']) {
@@ -65,26 +53,6 @@ function unregisterPlugin () {
     }
   } catch (e) {
     console.log(`Warning: could not update settings.json: ${e.message}`)
-  }
-}
-
-function unlinkTabbyPlugin () {
-  // Remove both old and new Tabby plugin dirs
-  for (const name of ['tabby-claude-dock', 'tabby-claude-code-zit']) {
-    const dest = path.join(tabbyPluginsDir(), 'node_modules', name)
-    if (!fs.existsSync(dest)) continue
-
-    try {
-      const stat = fs.lstatSync(dest)
-      if (stat.isSymbolicLink()) {
-        fs.unlinkSync(dest)
-      } else {
-        fs.rmSync(dest, { recursive: true, force: true })
-      }
-      console.log(`Removed Tabby plugin: ${dest}`)
-    } catch (e) {
-      console.log(`Warning: could not remove Tabby plugin: ${e.message}`)
-    }
   }
 }
 
@@ -158,7 +126,6 @@ try {
   killDaemon()
   removeCCPlugin()
   unregisterPlugin()
-  unlinkTabbyPlugin()
   cleanupLegacy()
   console.log('\nDone. claude-dock uninstalled.')
 } catch (e) {

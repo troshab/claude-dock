@@ -45,14 +45,14 @@ only, leave Docker image references unchanged.
 ### Distribution
 
 Everything is installed by a single command: `npm i -g @troshab/claude-dock`.
-The postinstall script (`scripts/install.js`) does three things:
+The postinstall script (`scripts/install.js`) does two things:
 1. Copies `plugin/` to `~/.claude/plugins/cache/claude-dock/claude-dock/<version>/`
    (Claude Code hooks -- delivered via plugin/hooks/hooks.json).
 2. Registers `claude-dock@claude-dock` in `~/.claude/settings.json` `enabledPlugins`.
-3. Links the Tabby plugin into `<tabby-plugins>/node_modules/tabby-claude-dock`.
 
-No separate marketplace command is needed. `npm uninstall -g @troshab/claude-dock`
-runs `scripts/uninstall.js` which reverses all three steps.
+The Tabby plugin must be installed separately by the user (e.g. via Claude Code).
+`npm uninstall -g @troshab/claude-dock` runs `scripts/uninstall.js` which reverses
+the two steps above.
 
 ## Known issues — embedded terminals
 

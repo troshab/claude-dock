@@ -32,17 +32,15 @@ only, leave Docker image references unchanged.
 
 **npm-only release** (plugin code, hooks, install scripts):
 1. Bump npm version in the 3 locations above (search-replace old -> new).
-2. `npm install --package-lock-only` to sync package-lock.json.
-3. Commit, push.
-4. `npm publish --access public` (requires OTP confirmation).
+2. Commit, push.
+3. `npm publish --access public` (requires OTP confirmation).
 
 **Docker release** (Dockerfile, entrypoint, base image changes):
 1. Bump Docker image tag in the 3 locations above.
 2. Optionally bump npm version too if there are plugin changes.
-3. `npm install --package-lock-only` if npm version changed.
-4. Commit, push.
-5. `git tag v<docker-version> && git push --tags` -- triggers image build on ghcr.io.
-6. `npm publish --access public` if npm version changed.
+3. Commit, push.
+4. `git tag v<docker-version> && git push --tags` -- triggers image build on ghcr.io.
+5. `npm publish --access public` if npm version changed.
 
 ### Distribution
 
